@@ -1,0 +1,62 @@
+[project]
+name = "stratagent"
+version = "0.0.0"
+description = "StratAgent — AI management-consulting platform (implementation)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+]
+
+# M0 uses a uv-managed "virtual project": dependencies + venv are managed, but the
+# root is not built into a wheel yet. Formal packaging is deferred until a
+# deployable artifact (e.g. the FastAPI app) requires it. Source is importable via
+# `pythonpath` (pytest) and `mypy_path` (mypy).
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "black>=24.8",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pre-commit>=3.8",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["packages", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "core",
+    "common",
+    "state",
+    "knowledge",
+    "planning",
+    "analysis",
+    "governance",
+    "reporting",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "packages"
+files = ["packages", "scripts"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+pythonpath = ["packages"]
+testpaths = ["tests"]
