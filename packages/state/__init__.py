@@ -1,6 +1,128 @@
-"""Engagement State — the single source of truth (ADR-002).
+"""Public API of the Engagement State package.
 
-M0 scope: foundational models only (Engagement Metadata + Lifecycle Status) plus
-JSON-Schema generation. The complete state model, event sourcing, projection, and
-invariants are built in M1.
+This module curates the **entire** public surface of ``state`` — the facade, the
+protocol, the domain models, the enums, and the shared value objects. Anything not
+re-exported here is internal and must not be imported directly. See
+``docs/api/EngagementState.md`` for the reference and stability guarantees.
 """
+
+from __future__ import annotations
+
+from common.models import DomainObject
+from common.values import ConfidenceScore, Identifier, Reference, new_id
+from state.enums import LifecycleStatus
+from state.facade import Engagement, EngagementProtocol
+from state.ledgers import Assumption, AssumptionStatus, Evidence, EvidenceType
+from state.models import EngagementMetadata, EngagementState
+from state.sections.analysis import AnalysisBlock, Finding, SensitivityCase
+from state.sections.enums import (
+    AnalysisStatus,
+    CaseArchetype,
+    ChallengeVerdict,
+    CheckResult,
+    ConstraintType,
+    DeliverableKind,
+    DeliverableStatus,
+    GapCriticality,
+    GapStatus,
+    IssueNodeStatus,
+    KnowledgeRefKind,
+    ObjectiveSource,
+    PlanStepStatus,
+    RecommendationStatus,
+    ReviewCheckName,
+    ReviewVerdict,
+    StakeholderRelationship,
+)
+from state.sections.governance import ChallengeNotes, ReviewCheck, ReviewerNotes
+from state.sections.output import (
+    ConfidenceReport,
+    Deliverable,
+    KnowledgeLink,
+    NextStep,
+    Recommendations,
+    RejectedAlternative,
+)
+from state.sections.planning import (
+    EngagementPlan,
+    FrameworkSelection,
+    IssueNode,
+    KnowledgeReference,
+    PlanStep,
+)
+from state.sections.scoping import (
+    CaseClassification,
+    Constraint,
+    Document,
+    Gap,
+    Objective,
+    ProblemDefinition,
+    Stakeholder,
+)
+
+__all__ = [
+    # Facade
+    "Engagement",
+    "EngagementProtocol",
+    # Root
+    "EngagementState",
+    "EngagementMetadata",
+    "LifecycleStatus",
+    # Ledgers
+    "Evidence",
+    "Assumption",
+    "EvidenceType",
+    "AssumptionStatus",
+    # Scoping
+    "Document",
+    "ProblemDefinition",
+    "Objective",
+    "Constraint",
+    "Stakeholder",
+    "CaseClassification",
+    "Gap",
+    "CaseArchetype",
+    "ObjectiveSource",
+    "ConstraintType",
+    "StakeholderRelationship",
+    "GapCriticality",
+    "GapStatus",
+    # Planning
+    "PlanStep",
+    "EngagementPlan",
+    "FrameworkSelection",
+    "IssueNode",
+    "KnowledgeReference",
+    "PlanStepStatus",
+    "IssueNodeStatus",
+    "KnowledgeRefKind",
+    # Analysis
+    "Finding",
+    "SensitivityCase",
+    "AnalysisBlock",
+    "AnalysisStatus",
+    # Governance
+    "ReviewCheck",
+    "ReviewerNotes",
+    "ChallengeNotes",
+    "ReviewCheckName",
+    "CheckResult",
+    "ReviewVerdict",
+    "ChallengeVerdict",
+    # Output
+    "NextStep",
+    "RejectedAlternative",
+    "Recommendations",
+    "ConfidenceReport",
+    "Deliverable",
+    "KnowledgeLink",
+    "RecommendationStatus",
+    "DeliverableKind",
+    "DeliverableStatus",
+    # Value objects
+    "ConfidenceScore",
+    "Identifier",
+    "Reference",
+    "DomainObject",
+    "new_id",
+]
