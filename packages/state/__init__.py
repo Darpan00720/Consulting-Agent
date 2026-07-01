@@ -11,7 +11,26 @@ from __future__ import annotations
 from common.models import DomainObject
 from common.values import ConfidenceScore, Identifier, Reference, new_id
 from state.enums import LifecycleStatus
+from state.events import (
+    EVENT_CATEGORIES,
+    Event,
+    EventCategory,
+    EventMetadata,
+    EventSource,
+    EventType,
+)
 from state.facade import Engagement, EngagementProtocol
+from state.identifiers import (
+    AssumptionId,
+    DeliverableId,
+    EngagementId,
+    EventId,
+    EvidenceId,
+    FrameworkId,
+    GapId,
+    IssueNodeId,
+    RecommendationId,
+)
 from state.ledgers import Assumption, AssumptionStatus, Evidence, EvidenceType
 from state.models import EngagementMetadata, EngagementState
 from state.sections.analysis import AnalysisBlock, Finding, SensitivityCase
@@ -125,4 +144,21 @@ __all__ = [
     "Reference",
     "DomainObject",
     "new_id",
+    # Strongly-typed identifiers
+    "EventId",
+    "EngagementId",
+    "AssumptionId",
+    "EvidenceId",
+    "GapId",
+    "IssueNodeId",
+    "FrameworkId",
+    "DeliverableId",
+    "RecommendationId",
+    # Events
+    "Event",
+    "EventMetadata",
+    "EventType",
+    "EventCategory",
+    "EventSource",
+    "EVENT_CATEGORIES",
 ]
