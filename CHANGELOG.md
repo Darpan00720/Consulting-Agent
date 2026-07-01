@@ -20,6 +20,7 @@ first tagged release.
   export-surface test).
 #### Notes
 - No new domain fields or behavior beyond create/read/validate/serialize.
+- The Engagement State public API (`docs/api/EngagementState.md`) is declared **Stable**.
 
 ### M1.2 — Engagement State Section Models & Aggregate — 2026-06-30
 #### Added

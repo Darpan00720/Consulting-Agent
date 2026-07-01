@@ -1,6 +1,7 @@
 ---
 title: Engagement State — Public API Reference
-status: Stable (as of M1.2)
+status: Stable
+lifecycle_entered: 2026-06-30 (following M1.3 approval)
 governing_adr: ADR-002
 applies_to: packages/state, packages/common (value objects)
 tags: [api, engagement-state, reference]
@@ -172,6 +173,10 @@ Mutation is performed **only** through the event API (a later sub-milestone), ne
 by editing state directly; the facade exposes no mutation methods.
 
 ## Stability guarantees
+**Lifecycle: Stable** — the Engagement State public API entered the **Stable**
+lifecycle on 2026-06-30 (following M1.3 approval). The public surface documented
+above is committed; changes follow the rules below.
+
 - **Pre-1.0.** The machine contract is the generated `schema/engagement-state.schema.json`,
   guarded by a drift test. Breaking changes are tracked in `CHANGELOG.md` and require
   an ADR-002 amendment.
