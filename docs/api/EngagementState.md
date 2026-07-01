@@ -31,6 +31,26 @@ part of this contract and may change without notice.
 | `Reference` | string id that **points to** another object's id | Referential integrity enforced later (M1.6) |
 | `new_id()` | factory returning a unique `Identifier` | IDs are the stable reference targets — never rely on list order |
 
+## Strongly-typed identifiers
+**Controlled API refinement (pre-external-release, 2026-06-30):** addressable domain
+objects use distinct typed ids (`NewType` over `str`) for their `id`, aligning the
+domain and event models so no conversion code is needed between layers. Same runtime
+representation, distinct at type-check; JSON-schema-compatible. Home: `state.identifiers`.
+
+| Typed id | Used by |
+|---|---|
+| `EngagementId` | `EngagementMetadata.engagement_id` |
+| `EvidenceId` | `Evidence.id` |
+| `AssumptionId` | `Assumption.id` |
+| `GapId` | `Gap.id` |
+| `IssueNodeId` | `IssueNode.id` |
+| `FrameworkId` | `FrameworkSelection.id` |
+| `DeliverableId` | `Deliverable.id` |
+| `RecommendationId` | `Recommendations.id` |
+| `EventId` | events (see `Events.md`) |
+
+Embedded/nested records never referenced by id keep the base `Identifier`.
+
 ## Base: `DomainObject` (inherited by every domain model below)
 Every model in this reference (except `EngagementState` and `EngagementMetadata`)
 inherits these fields:
@@ -79,7 +99,7 @@ begins `None` or as an empty collection and is populated over the lifecycle.
 | `knowledge_links` | `list[KnowledgeLink]` | `[]` | §25 |
 
 ### `EngagementMetadata` (§1)
-`engagement_id: str` · `tenant_id: str` · `slug: str` · `created_at: datetime` (auto)
+`engagement_id: EngagementId` · `tenant_id: str` · `slug: str` · `created_at: datetime` (auto)
 · `updated_at: datetime` (auto) · `created_by: "human" | "system" = "human"` ·
 `state_version: int = 0` · `schema_version: int = 1`.
 

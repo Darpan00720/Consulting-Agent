@@ -7,6 +7,23 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.4 — Event Model + Identifier Harmonization — 2026-06-30
+#### Added
+- Event model: `EventMetadata` (business `occurred_at` + system `recorded_at`;
+  `actor` vs `source`; `schema_version`; `causation_id`/`correlation_id`),
+  `EventSource`, `EventCategory` (every event maps to exactly one), `EventType`, and
+  the frozen, immutable, self-contained event catalog as a discriminated `Event`
+  union. Documented in `docs/api/Events.md`.
+- Strongly-typed identifiers (`EventId`, `EngagementId`, `EvidenceId`, `AssumptionId`,
+  `GapId`, `IssueNodeId`, `FrameworkId`, `DeliverableId`, `RecommendationId`) in
+  `state.identifiers`.
+#### Changed
+- **Controlled API refinement (pre-external-release):** addressable domain models now
+  use their strongly-typed ids (`Evidence.id: EvidenceId`,
+  `EngagementMetadata.engagement_id: EngagementId`, etc.), aligning the domain and
+  event layers. Schema-compatible (typed ids serialize as strings) — a documented
+  refinement, not a breaking change.
+
 ### M1.3 — Engagement State Facade — 2026-06-30
 #### Added
 - `Engagement` facade — the sole public entry point — with a **frozen** six-method

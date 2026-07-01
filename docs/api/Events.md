@@ -45,9 +45,13 @@ already-Stable domain models; these typed ids are used by **event references**.
 | `DeliverableId` | a `Deliverable` |
 | `RecommendationId` | the `Recommendations` object |
 
-> Note: the Stable domain models keep `Identifier` for their own `id` (changing
-> them is a Stable-API change, out of M1.4 scope). Harmonizing domain-model ids with
-> these typed ids is a candidate future step (would require an ADR-002 amendment).
+> **Controlled API refinement (pre-external-release, 2026-06-30):** the addressable
+> domain models now use these typed ids for their `id` (e.g., `Evidence.id: EvidenceId`,
+> `EngagementMetadata.engagement_id: EngagementId`), aligning the domain and event
+> layers so no conversion code is needed. Completed before first external release —
+> a documented refinement, **not** a breaking change (typed ids serialize as strings,
+> so the JSON schema is unchanged). Embedded/nested records never referenced by id
+> keep the base `Identifier`.
 
 ## `EventSource` (how the event entered the system)
 `cli · api · agent · system · import · other` — distinct from **actor** (who).
