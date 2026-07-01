@@ -16,6 +16,7 @@ from pydantic import Field
 
 from core.base import StratAgentModel
 from state.enums import LifecycleStatus
+from state.identifiers import EngagementId
 from state.ledgers import Assumption, Evidence
 from state.sections.analysis import AnalysisBlock
 from state.sections.governance import ChallengeNotes, ReviewerNotes
@@ -48,7 +49,7 @@ def _utcnow() -> datetime:
 class EngagementMetadata(StratAgentModel):
     """ADR-002 §1 — Engagement Metadata."""
 
-    engagement_id: str
+    engagement_id: EngagementId
     tenant_id: str
     slug: str
     created_at: datetime = Field(default_factory=_utcnow)

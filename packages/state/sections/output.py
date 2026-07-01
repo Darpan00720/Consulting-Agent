@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from common.models import DomainObject
 from common.values import ConfidenceScore, Reference
+from state.identifiers import (
+    DeliverableId,
+    RecommendationId,
+    new_deliverable_id,
+    new_recommendation_id,
+)
 from state.sections.enums import (
     DeliverableKind,
     DeliverableStatus,
@@ -31,6 +39,7 @@ class RejectedAlternative(DomainObject):
 class Recommendations(DomainObject):
     """ADR-002 §22 — Recommendations."""
 
+    id: RecommendationId = Field(default_factory=new_recommendation_id, frozen=True)
     decision: str | None = None
     rationale: str | None = None
     next_steps: list[NextStep] = []
@@ -51,6 +60,7 @@ class ConfidenceReport(DomainObject):
 class Deliverable(DomainObject):
     """ADR-002 §24 — a single deliverable."""
 
+    id: DeliverableId = Field(default_factory=new_deliverable_id, frozen=True)
     kind: DeliverableKind
     path: str | None = None
     format: str | None = None

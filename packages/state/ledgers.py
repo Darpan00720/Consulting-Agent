@@ -17,10 +17,16 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from common.models import DomainObject
 from common.values import ConfidenceScore
+from state.identifiers import (
+    AssumptionId,
+    EvidenceId,
+    new_assumption_id,
+    new_evidence_id,
+)
 
 
 class EvidenceType(StrEnum):
@@ -47,6 +53,7 @@ class Evidence(DomainObject):
     by the modular rule registry defined below, not by inline conditionals.
     """
 
+    id: EvidenceId = Field(default_factory=new_evidence_id, frozen=True)
     claim: str
     type: EvidenceType
     source: str | None = None
@@ -96,6 +103,7 @@ def _validate_evidence_type(evidence: Evidence) -> None:
 class Assumption(DomainObject):
     """A single assumption ledger record (ADR-002 §9)."""
 
+    id: AssumptionId = Field(default_factory=new_assumption_id, frozen=True)
     statement: str
     value: str
     rationale: str

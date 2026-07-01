@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from common.models import DomainObject
 from common.values import ConfidenceScore, Reference
+from state.identifiers import GapId, new_gap_id
 from state.sections.enums import (
     CaseArchetype,
     ConstraintType,
@@ -72,6 +75,7 @@ class CaseClassification(DomainObject):
 class Gap(DomainObject):
     """ADR-002 §8 — a single information gap."""
 
+    id: GapId = Field(default_factory=new_gap_id, frozen=True)
     question: str
     criticality: GapCriticality = GapCriticality.USEFUL
     status: GapStatus = GapStatus.OPEN

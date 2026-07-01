@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from common.models import DomainObject
 from common.values import ConfidenceScore, Reference
+from state.identifiers import (
+    FrameworkId,
+    IssueNodeId,
+    new_framework_id,
+    new_issue_node_id,
+)
 from state.sections.enums import (
     CaseArchetype,
     IssueNodeStatus,
@@ -34,6 +42,7 @@ class EngagementPlan(DomainObject):
 class FrameworkSelection(DomainObject):
     """ADR-002 §11 — a selected and adapted framework."""
 
+    id: FrameworkId = Field(default_factory=new_framework_id, frozen=True)
     name: str
     archetype: CaseArchetype | None = None
     rationale: str | None = None
@@ -44,6 +53,7 @@ class FrameworkSelection(DomainObject):
 class IssueNode(DomainObject):
     """ADR-002 §12 — a node in the (flat, parent-referenced) issue tree."""
 
+    id: IssueNodeId = Field(default_factory=new_issue_node_id, frozen=True)
     parent: Reference | None = None
     question: str
     owner: str | None = None

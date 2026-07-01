@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, Protocol, Self
 
+from state.identifiers import EngagementId
 from state.models import EngagementMetadata, EngagementState
 
 
@@ -60,7 +61,7 @@ class Engagement:
     ) -> Self:
         """Create a new engagement as a valid, bare Engagement State."""
         metadata = EngagementMetadata(
-            engagement_id=engagement_id,
+            engagement_id=EngagementId(engagement_id),
             tenant_id=tenant_id,
             slug=slug,
             created_by=created_by,
