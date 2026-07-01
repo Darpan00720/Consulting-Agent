@@ -5,8 +5,10 @@ are enforced through a small rule registry (``_EVIDENCE_RULES``) so a new eviden
 type can be supported by registering a rule — the model validator stays a thin
 dispatcher rather than growing into a monolithic conditional.
 
-Aggregate rules, referential integrity, projection, persistence, and events are
-explicitly out of scope here (later M1 sub-milestones).
+Refactored in M1.2 onto ``DomainObject`` (immutable id + optional audit metadata)
+and the shared ``ConfidenceScore`` value object; record-level behavior is unchanged.
+Aggregate rules, referential integrity, projection, persistence, and events remain
+out of scope (later M1 sub-milestones).
 """
 
 from __future__ import annotations
@@ -15,9 +17,10 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 
-from core.base import StratAgentModel
+from common.models import DomainObject
+from common.values import ConfidenceScore
 
 
 class EvidenceType(StrEnum):
@@ -37,20 +40,19 @@ class AssumptionStatus(StrEnum):
     CONFIRMED = "confirmed"
 
 
-class Evidence(StratAgentModel):
+class Evidence(DomainObject):
     """A single evidence record (ADR-002 §14).
 
     ``type`` determines which fields are required; those requirements are enforced
     by the modular rule registry defined below, not by inline conditionals.
     """
 
-    id: str
     claim: str
     type: EvidenceType
     source: str | None = None
     method: str | None = None
     as_of: datetime | None = None
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: ConfidenceScore
     validated: bool = False
     validator: str | None = None
 
@@ -91,15 +93,14 @@ def _validate_evidence_type(evidence: Evidence) -> None:
         rule(evidence)
 
 
-class Assumption(StratAgentModel):
+class Assumption(DomainObject):
     """A single assumption ledger record (ADR-002 §9)."""
 
-    id: str
     statement: str
     value: str
     rationale: str
     owner: str
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: ConfidenceScore
     load_bearing: bool = False
     breakeven: str | None = None
     status: AssumptionStatus = AssumptionStatus.ACTIVE
