@@ -7,6 +7,26 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.2 — Engagement State Section Models & Aggregate — 2026-06-30
+#### Added
+- All ADR-002 §3–§25 section models (scoping, planning, analysis, governance,
+  output) and the full `EngagementState` aggregate — valid with only `metadata`
+  (every other section Optional or an empty collection).
+- `common` value objects: `ConfidenceScore` (validated [0, 1]), `Identifier` /
+  `Reference` aliases, and a `DomainObject` base providing an immutable
+  auto-generated `id` plus optional `created_at/updated_at/created_by/updated_by`
+  audit metadata.
+- Extensible enums (`OTHER`/`UNKNOWN` where taxonomies are open).
+- Section-coverage test tracing every ADR-002 §3–§25 section to an
+  `EngagementState` field.
+#### Changed
+- Refactored `Evidence`/`Assumption` onto `DomainObject` + `ConfidenceScore`
+  (behavior unchanged; M1.1 tests remain green).
+- Regenerated `schema/engagement-state.schema.json` from the full models.
+#### Notes
+- Models only; events / projection / invariants / persistence / facade remain
+  later M1 sub-milestones. 36 tests; state coverage 99%; quality gate green.
+
 ### M1.1 — Evidence & Assumption Ledgers — 2026-06-30
 #### Added
 - `state.Evidence` and `state.Assumption` record models (ADR-002 §9, §14) with
