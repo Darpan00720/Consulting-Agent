@@ -153,12 +153,23 @@ Rule: `load_bearing` → `breakeven` required.
 | `DeliverableKind` | report · deck · model · **other** |
 | `DeliverableStatus` | pending · generated · delivered |
 
-## Facade (entry point — introduced in M1.3)
-`Engagement` will be the sole public entry point for Engagement State operations.
-Planned public operations: **create** a new engagement, access the **current
-state**, **validate**, and **serialize / deserialize** (JSON). Mutation is performed
-only through the event API (added in a later sub-milestone), never by editing the
-state directly. Exact signatures are finalized in the M1.3 plan.
+## Facade (entry point — M1.3)
+`Engagement` is the sole public entry point for Engagement State operations, and it
+implements `EngagementProtocol` so alternative implementations (file-backed,
+AgentDB-backed, testing) can be substituted without changing consumers. The public
+API is **frozen** to exactly six operations:
+
+| Operation | Kind | Signature | Purpose |
+|---|---|---|---|
+| `create` | classmethod | `(engagement_id, tenant_id, slug, created_by="human") -> Engagement` | New engagement as a valid bare state |
+| `from_state` | classmethod | `(state: EngagementState) -> Engagement` | Wrap an existing state |
+| `from_json` | classmethod | `(data: str) -> Engagement` | Deserialize from JSON |
+| `get_state` | method | `() -> EngagementState` | Read the current state (accessor, not an attribute — lets an immutable/projected view be introduced later) |
+| `validate` | method | `() -> None` | Re-validate; raises on violation |
+| `to_json` | method | `() -> str` | Serialize to JSON |
+
+Mutation is performed **only** through the event API (a later sub-milestone), never
+by editing state directly; the facade exposes no mutation methods.
 
 ## Stability guarantees
 - **Pre-1.0.** The machine contract is the generated `schema/engagement-state.schema.json`,

@@ -7,6 +7,20 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.3 — Engagement State Facade — 2026-06-30
+#### Added
+- `Engagement` facade — the sole public entry point — with a **frozen** six-method
+  API (`create`, `from_state`, `from_json`, `get_state`, `validate`, `to_json`).
+  State is reached via `get_state()` (accessor, not a public attribute) and evolves
+  only through the event API (later); no mutation methods are exposed.
+- `EngagementProtocol` describing the facade contract, so file-backed / AgentDB /
+  testing implementations can be substituted without changing consumers.
+- Curated public surface: `state.__all__` re-exports the facade, protocol, models,
+  enums, and value objects; internals are not exported (guarded by an
+  export-surface test).
+#### Notes
+- No new domain fields or behavior beyond create/read/validate/serialize.
+
 ### M1.2 — Engagement State Section Models & Aggregate — 2026-06-30
 #### Added
 - All ADR-002 §3–§25 section models (scoping, planning, analysis, governance,
