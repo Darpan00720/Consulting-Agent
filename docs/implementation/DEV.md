@@ -18,7 +18,7 @@ make hooks        # (optional) install pre-commit git hooks
 make check        # ruff (lint) + black --check (format) + mypy (types) + pytest (tests)
 ```
 Individual targets: `make lint`, `make format`, `make typecheck`, `make test`,
-`make fmt` (auto-format).
+`make cov` (coverage), `make fmt` (auto-format).
 
 ## Engagement State schema
 The Engagement State is modelled in Pydantic (`packages/state/`). The JSON Schema

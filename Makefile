@@ -1,4 +1,4 @@
-.PHONY: install fmt lint format typecheck test schema check hooks
+.PHONY: install fmt lint format typecheck test cov schema check hooks
 
 install:
 	uv sync
@@ -17,6 +17,9 @@ typecheck:
 
 test:
 	uv run pytest
+
+cov:
+	uv run pytest --cov=state --cov-report=term-missing
 
 schema:
 	PYTHONPATH=packages uv run python scripts/generate_schema.py
