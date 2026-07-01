@@ -1,0 +1,14 @@
+{
+  "name": "stratagent",
+  "description": "StratAgent marketplace — AI management-consulting plugins for Claude Code, built on the Ruflo harness.",
+  "owner": {
+    "name": "darpan"
+  },
+  "plugins": [
+    {
+      "name": "ruflo-stratagent",
+      "source": "./plugins/ruflo-stratagent",
+      "description": "Autonomous management-consulting engagements: classify the case type, scope it, dispatch specialist consultants, challenge findings, and deliver an executive report."
+    }
+  ]
+}
