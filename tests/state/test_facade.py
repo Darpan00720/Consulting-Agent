@@ -119,6 +119,23 @@ EXPECTED_PUBLIC_API = {
     "Reference",
     "DomainObject",
     "new_id",
+    # strongly-typed identifiers
+    "EventId",
+    "EngagementId",
+    "AssumptionId",
+    "EvidenceId",
+    "GapId",
+    "IssueNodeId",
+    "FrameworkId",
+    "DeliverableId",
+    "RecommendationId",
+    # events
+    "Event",
+    "EventMetadata",
+    "EventType",
+    "EventCategory",
+    "EventSource",
+    "EVENT_CATEGORIES",
 }
 
 
