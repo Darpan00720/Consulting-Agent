@@ -170,7 +170,7 @@ class EngagementCreated(_EventBase):
     type: Literal[EventType.ENGAGEMENT_CREATED] = EventType.ENGAGEMENT_CREATED
     slug: str
     tenant_id: str
-    created_by: str = "human"
+    created_by: Literal["human", "system"] = "human"
 
 
 class ProblemDefined(_EventBase):
