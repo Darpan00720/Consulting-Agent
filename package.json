@@ -1,0 +1,9 @@
+{
+  "name": "stratagent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "StratAgent — AI management-consulting platform on the Ruflo harness (Node side pins the Ruflo orchestration runtime; Python packages live under packages/)",
+  "devDependencies": {
+    "ruflo": "3.16.3"
+  }
+}

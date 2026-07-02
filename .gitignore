@@ -22,3 +22,12 @@ coverage.xml
 
 # Obsidian workspace UI state (repo root)
 /.obsidian/
+
+# Node (Ruflo harness pinned via package.json)
+node_modules/
+.claude/memory.db
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.swarm/
+ruvector.db
