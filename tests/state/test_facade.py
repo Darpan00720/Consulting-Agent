@@ -113,6 +113,12 @@ EXPECTED_PUBLIC_API = {
     "RecommendationStatus",
     "DeliverableKind",
     "DeliverableStatus",
+    # lifecycle audit
+    "PhaseRecord",
+    "QualityGate",
+    "PendingRequirement",
+    "GateResult",
+    "PendingKind",
     # value objects
     "ConfidenceScore",
     "Identifier",
