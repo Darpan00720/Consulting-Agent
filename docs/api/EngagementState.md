@@ -194,14 +194,18 @@ API is **frozen** to exactly six operations:
 | Operation | Kind | Signature | Purpose |
 |---|---|---|---|
 | `create` | classmethod | `(engagement_id, tenant_id, slug, created_by="human") -> Engagement` | New engagement as a valid bare state |
-| `from_state` | classmethod | `(state: EngagementState) -> Engagement` | Wrap an existing state |
+| `from_state` | classmethod | `(state: EngagementState) -> Engagement` | Adopt an existing state (**deep-copied on ingest** — the caller's instance is never aliased) |
 | `from_json` | classmethod | `(data: str) -> Engagement` | Deserialize from JSON |
-| `get_state` | method | `() -> EngagementState` | Read the current state (accessor, not an attribute — lets an immutable/projected view be introduced later) |
+| `get_state` | method | `() -> EngagementState` | Read the current state as a **detached deep snapshot**: mutating it (models, lists, dicts — anywhere in the object graph) never affects the engagement; successive calls return equal but distinct objects |
 | `validate` | method | `() -> None` | Re-validate; raises on violation |
 | `to_json` | method | `() -> str` | Serialize to JSON |
 
 Mutation is performed **only** through the event API (a later sub-milestone), never
 by editing state directly; the facade exposes no mutation methods.
+
+> get_state() returns a detached deep snapshot. The operation prioritizes
+> correctness and isolation over raw performance. Performance characteristics
+> are benchmarked in M1.7.7.
 
 ## Stability guarantees
 **Lifecycle: Stable** — the Engagement State public API entered the **Stable**

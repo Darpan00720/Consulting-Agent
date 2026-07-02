@@ -7,6 +7,16 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.7 — Concurrency, Versioning & Corrections — in progress
+#### Changed
+- **M1.7.1 (design D1) — snapshot semantics:** `Engagement.get_state()` now returns
+  a **detached deep snapshot** and `Engagement.from_state()` deep-copies on ingest.
+  No caller ever holds an alias of the internal state; mutating a snapshot (nested
+  models, lists, or the `by_section` dict — anywhere in the object graph) never
+  affects the engagement. Signatures unchanged; pre-release behavioral tightening
+  of the M1.3-approved intent ("get_state()/snapshot()"), documented in
+  `docs/api/EngagementState.md`. Snapshot cost is O(state); benchmarked in M1.7.7.
+
 ### M1.6 — Invariants & Validation — 2026-07-02
 #### Added
 - `state.validation`: state invariant checking **separate from projection**. Rules
