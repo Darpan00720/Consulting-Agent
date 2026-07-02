@@ -7,9 +7,12 @@ testing) can satisfy the same protocol without changing consumers.
 The public API is frozen to exactly six operations: ``create``, ``from_state``,
 ``from_json`` (constructors), ``get_state``, ``validate``, ``to_json``. State
 evolves only through the event API (a later sub-milestone); this facade
-intentionally exposes **no mutation methods**, and the current state is reached
-via ``get_state()`` rather than a public attribute so an immutable/projected view
-can be introduced later without breaking callers.
+intentionally exposes **no mutation methods**.
+
+Snapshot semantics (M1.7, design D1): state crosses the public boundary only as
+**detached deep copies** — ``get_state()`` returns a snapshot and ``from_state``
+copies on ingest — so no caller ever holds an alias of the internal state, and
+mutating a snapshot can never affect the engagement.
 """
 
 from __future__ import annotations
@@ -70,8 +73,12 @@ class Engagement:
 
     @classmethod
     def from_state(cls, state: EngagementState) -> Self:
-        """Wrap an existing Engagement State."""
-        return cls(state)
+        """Adopt an existing Engagement State (deep-copied on ingest).
+
+        The caller's instance is never aliased: mutating it after this call has
+        no effect on the engagement.
+        """
+        return cls(state.model_copy(deep=True))
 
     @classmethod
     def from_json(cls, data: str) -> Self:
@@ -79,8 +86,13 @@ class Engagement:
         return cls(EngagementState.model_validate_json(data))
 
     def get_state(self) -> EngagementState:
-        """Return the current Engagement State."""
-        return self._state
+        """Return a detached deep snapshot of the current Engagement State.
+
+        Mutating the snapshot (models, lists, dicts — anywhere in the object
+        graph) never affects the engagement. Successive calls return equal but
+        distinct objects.
+        """
+        return self._state.model_copy(deep=True)
 
     def validate(self) -> None:
         """Re-validate the current state; raises on any violation."""
