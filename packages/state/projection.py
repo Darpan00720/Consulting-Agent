@@ -92,7 +92,9 @@ from state.sections.lifecycle import PendingRequirement, PhaseRecord, QualityGat
 from state.sections.output import KnowledgeLink, Recommendations
 from state.sections.scoping import ProblemDefinition
 
-PROJECTION_VERSION = 1
+# v1: initial fold (M1.5). v2: apply() derives metadata.state_version from the
+# event's seq (M1.7.2, design D4) — the same log now folds to a different state.
+PROJECTION_VERSION = 2
 
 # Fixed origin timestamp so projection stays deterministic for objects it builds.
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -137,8 +139,17 @@ def _apply(event: object, state: EngagementState) -> EngagementState:
 
 
 def apply(state: EngagementState, event: Event) -> EngagementState:
-    """Pure single-event reducer: (state, event) -> new state."""
-    return _apply(event, state)
+    """Pure single-event reducer: (state, event) -> new state.
+
+    Projection is the single authority for ``metadata.state_version``: it is
+    derived solely from ``event.metadata.seq`` (projection v2, design D4). The
+    stamp is unconditional, so no caller-assigned value survives an apply.
+    """
+    new_state = _apply(event, state)
+    metadata = new_state.metadata.model_copy(
+        update={"state_version": event.metadata.seq}
+    )
+    return new_state.model_copy(update={"metadata": metadata})
 
 
 def project(events: Iterable[Event]) -> EngagementState:

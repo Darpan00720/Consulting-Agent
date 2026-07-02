@@ -135,3 +135,54 @@ def test_every_event_type_has_a_reducer() -> None:
     registered = set(_apply.registry.keys())
     for member in members:
         assert member in registered, f"no reducer for {member.__name__}"
+
+
+# --- M1.7.2 (design D4): fold-derived state_version --------------------------
+
+
+def _sequenced_log(n: int) -> list[Event]:
+    """A log of n events with contiguous 1-based seq."""
+    log: list[Event] = [
+        EngagementCreated(metadata=_meta(seq=1), slug="demo", tenant_id="t_1")
+    ]
+    for seq in range(2, n + 1):
+        log.append(EvidenceAdded(metadata=_meta(seq=seq), evidence=_evidence()))
+    return log
+
+
+def test_empty_projection_has_state_version_zero() -> None:
+    state = project([])
+    assert state.metadata.state_version == 0
+    assert state.projection_version == PROJECTION_VERSION
+
+
+def test_single_event_projection_derives_state_version() -> None:
+    assert project(_sequenced_log(1)).metadata.state_version == 1
+
+
+def test_multi_event_projection_derives_state_version() -> None:
+    assert project(_sequenced_log(5)).metadata.state_version == 5
+
+
+def test_reprojection_yields_identical_state_version() -> None:
+    log = _sequenced_log(3)
+    first, second = project(log), project(log)
+    assert first == second
+    assert first.metadata.state_version == second.metadata.state_version == 3
+
+
+def test_projection_version_is_2() -> None:
+    assert PROJECTION_VERSION == 2
+    assert project([]).projection_version == 2
+    assert project(_sequenced_log(2)).projection_version == 2
+
+
+def test_manual_state_version_cannot_influence_projection() -> None:
+    log = _sequenced_log(2)
+    tampered = project(log)
+    tampered.metadata.state_version = 999
+    # applying the next event derives the version from the event, not the input
+    next_event = EvidenceAdded(metadata=_meta(seq=3), evidence=_evidence())
+    assert apply(tampered, next_event).metadata.state_version == 3
+    # and a fresh projection of the same log is untouched by the tampering
+    assert project(log).metadata.state_version == 2
