@@ -16,6 +16,16 @@ first tagged release.
   never a contract); `AppendResult` (frozen, JSON-serializable both ways):
   `success`, `version`, `projection_version` (self-describing projection
   semantics), `first_seq`, `last_seq`, `appended`, `warnings`.
+- **M1.7.3-S2 — sequence stamping + version derivation** (pure, stateless
+  arithmetic): `sequencing.stamp(events, first_seq)` returns contiguous-seq
+  frozen copies and accepts **only unassigned events** (`seq == 0`; re-stamping
+  rejected); `versioning.current_version / current_sequence / next_state_version`
+  derive exclusively from `event.metadata.seq` (never payloads), with
+  `next_state_version == current_sequence` making the D2↔D4 identity explicit.
+  Precondition violations raise `ValueError` (programmer errors) — `AppendError`
+  stays reserved for the public append API. 18 dedicated invariant tests
+  (A1–A8, V1–V7, C1–C3). These modules are arithmetic only; correctness is
+  established by S3 admission, the S4 pipeline, and M1.7.4 replay integrity.
 #### Changed
 - **M1.7.2 (design D4) — fold-derived `state_version`; `PROJECTION_VERSION` 1 → 2:**
   `apply()` now unconditionally derives `metadata.state_version` from
