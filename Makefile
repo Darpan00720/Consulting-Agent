@@ -1,4 +1,4 @@
-.PHONY: install fmt lint format typecheck test cov schema check hooks
+.PHONY: install fmt lint format typecheck test cov schema traceability check hooks
 
 install:
 	uv sync
@@ -23,6 +23,9 @@ cov:
 
 schema:
 	PYTHONPATH=packages uv run python scripts/generate_schema.py
+
+traceability:
+	PYTHONPATH=packages uv run python scripts/generate_traceability.py
 
 # Canonical M0 quality gate.
 check: lint format typecheck test
