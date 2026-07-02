@@ -20,6 +20,7 @@ from state.identifiers import EngagementId
 from state.ledgers import Assumption, Evidence
 from state.sections.analysis import AnalysisBlock
 from state.sections.governance import ChallengeNotes, ReviewerNotes
+from state.sections.lifecycle import PendingRequirement, PhaseRecord, QualityGate
 from state.sections.output import (
     ConfidenceReport,
     Deliverable,
@@ -104,3 +105,9 @@ class EngagementState(StratAgentModel):
     confidence: ConfidenceReport | None = None
     deliverables: list[Deliverable] = []
     knowledge_links: list[KnowledgeLink] = []
+
+    # Lifecycle audit (§2) + projection provenance
+    phase_history: list[PhaseRecord] = []
+    quality_gates: list[QualityGate] = []
+    pending_requirements: list[PendingRequirement] = []
+    projection_version: int = 0

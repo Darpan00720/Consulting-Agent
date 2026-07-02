@@ -44,9 +44,11 @@ from state.sections.enums import (
     DeliverableStatus,
     GapCriticality,
     GapStatus,
+    GateResult,
     IssueNodeStatus,
     KnowledgeRefKind,
     ObjectiveSource,
+    PendingKind,
     PlanStepStatus,
     RecommendationStatus,
     ReviewCheckName,
@@ -54,6 +56,7 @@ from state.sections.enums import (
     StakeholderRelationship,
 )
 from state.sections.governance import ChallengeNotes, ReviewCheck, ReviewerNotes
+from state.sections.lifecycle import PendingRequirement, PhaseRecord, QualityGate
 from state.sections.output import (
     ConfidenceReport,
     Deliverable,
@@ -138,6 +141,12 @@ __all__ = [
     "RecommendationStatus",
     "DeliverableKind",
     "DeliverableStatus",
+    # Lifecycle audit
+    "PhaseRecord",
+    "QualityGate",
+    "PendingRequirement",
+    "GateResult",
+    "PendingKind",
     # Value objects
     "ConfidenceScore",
     "Identifier",

@@ -140,3 +140,16 @@ class DeliverableStatus(StrEnum):
     PENDING = "pending"
     GENERATED = "generated"
     DELIVERED = "delivered"
+
+
+class GateResult(StrEnum):
+    PASS = "pass"
+    FAIL = "fail"
+    LOOP = "loop"
+
+
+class PendingKind(StrEnum):
+    HUMAN_INPUT = "human_input"
+    INFORMATION = "information"
+    BLOCKER = "blocker"
+    OTHER = "other"

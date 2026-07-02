@@ -1547,6 +1547,15 @@
       "title": "GapStatus",
       "type": "string"
     },
+    "GateResult": {
+      "enum": [
+        "pass",
+        "fail",
+        "loop"
+      ],
+      "title": "GateResult",
+      "type": "string"
+    },
     "IssueNode": {
       "additionalProperties": false,
       "description": "ADR-002 \u00a712 \u2014 a node in the (flat, parent-referenced) issue tree.",
@@ -2176,6 +2185,207 @@
       "title": "ObjectiveSource",
       "type": "string"
     },
+    "PendingKind": {
+      "enum": [
+        "human_input",
+        "information",
+        "blocker",
+        "other"
+      ],
+      "title": "PendingKind",
+      "type": "string"
+    },
+    "PendingRequirement": {
+      "additionalProperties": false,
+      "description": "An outstanding requirement: an execution blocker or missing information.\n\nBroadens the ADR-002 \u00a72 ``blocked_on`` marker to represent both categories.",
+      "properties": {
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "created_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PendingKind",
+          "default": "other"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        },
+        "updated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated By"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "PendingRequirement",
+      "type": "object"
+    },
+    "PhaseRecord": {
+      "additionalProperties": false,
+      "description": "A phase entered (and optionally exited) during the engagement (ADR-002 \u00a72).",
+      "properties": {
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "created_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By"
+        },
+        "entered_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entered At"
+        },
+        "exited_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exited At"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/LifecycleStatus"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        },
+        "updated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated By"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "title": "PhaseRecord",
+      "type": "object"
+    },
     "PlanStep": {
       "additionalProperties": false,
       "description": "A single step in the engagement plan (ADR-002 \u00a710).",
@@ -2379,6 +2589,104 @@
         "raw_input"
       ],
       "title": "ProblemDefinition",
+      "type": "object"
+    },
+    "QualityGate": {
+      "additionalProperties": false,
+      "description": "A quality-gate outcome \u2014 Reviewer/Challenger (ADR-002 \u00a72).",
+      "properties": {
+        "by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "By"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "created_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By"
+        },
+        "gate": {
+          "title": "Gate",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/GateResult"
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ts"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        },
+        "updated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated By"
+        }
+      },
+      "required": [
+        "gate",
+        "result"
+      ],
+      "title": "QualityGate",
       "type": "object"
     },
     "RecommendationStatus": {
@@ -3132,6 +3440,22 @@
       ],
       "default": null
     },
+    "pending_requirements": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PendingRequirement"
+      },
+      "title": "Pending Requirements",
+      "type": "array"
+    },
+    "phase_history": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PhaseRecord"
+      },
+      "title": "Phase History",
+      "type": "array"
+    },
     "plan": {
       "anyOf": [
         {
@@ -3153,6 +3477,19 @@
         }
       ],
       "default": null
+    },
+    "projection_version": {
+      "default": 0,
+      "title": "Projection Version",
+      "type": "integer"
+    },
+    "quality_gates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/QualityGate"
+      },
+      "title": "Quality Gates",
+      "type": "array"
     },
     "recommendations": {
       "anyOf": [
