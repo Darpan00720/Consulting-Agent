@@ -8,6 +8,14 @@ first tagged release.
 ## [Unreleased]
 
 ### M1.7 — Concurrency, Versioning & Corrections — in progress
+#### Added
+- **M1.7.3-S1 — append contract primitives** (`state/append/`, internal until S5):
+  error hierarchy `AppendError` → `VersionConflictError` (expected/actual) and
+  `EventAdmissionError` (reason/event_id), each carrying a stable machine-readable
+  `error_code` (`AppendErrorCode`, a frozen namespace — messages are human-readable,
+  never a contract); `AppendResult` (frozen, JSON-serializable both ways):
+  `success`, `version`, `projection_version` (self-describing projection
+  semantics), `first_seq`, `last_seq`, `appended`, `warnings`.
 #### Changed
 - **M1.7.2 (design D4) — fold-derived `state_version`; `PROJECTION_VERSION` 1 → 2:**
   `apply()` now unconditionally derives `metadata.state_version` from
