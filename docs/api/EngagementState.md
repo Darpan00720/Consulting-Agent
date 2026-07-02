@@ -107,6 +107,11 @@ begins `None` or as an empty collection and is populated over the lifecycle.
 · `updated_at: datetime` (auto) · `created_by: "human" | "system" = "human"` ·
 `state_version: int = 0` · `schema_version: int = 1`.
 
+`state_version` is **projection-derived** (M1.7.2): for a projected state it equals
+the `seq` of the last applied event (`0` = no events applied). Projection is its
+single authority — the stamp is unconditional, so caller-assigned values never
+survive an apply/projection.
+
 ## Ledgers
 **`Evidence`** (§14): `claim: str` · `type: EvidenceType` · `source: str?` ·
 `method: str?` · `as_of: datetime?` · `confidence: ConfidenceScore` ·

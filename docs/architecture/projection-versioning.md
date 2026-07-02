@@ -18,7 +18,7 @@ that built it, so a future change can be migrated or re-projected deliberately.
 - **`0`** — the state was **not** produced by projection (e.g., constructed directly
   via the `Engagement` facade). This is the default on `EngagementState`.
 - **`N` (≥ 1)** — produced by projection implementation version `N`. `project()`
-  currently stamps `PROJECTION_VERSION = 1`.
+  currently stamps `PROJECTION_VERSION = 2`.
 
 ## When it MUST change (bump `PROJECTION_VERSION`)
 Bump when a change to the reducer would cause the **same, previously-valid event log
@@ -44,3 +44,9 @@ Do **not** bump when the projection of every previously-valid log is unchanged:
 - A bump is a deliberate, reviewed change recorded in `CHANGELOG.md`, and — once
   persistence and replay land (M1.8 / M1.9) — must be accompanied by a migration note
   describing how existing stored states are handled.
+
+## Version history
+| Version | Date | Why the projection changed | Migration |
+|---|---|---|---|
+| 1 | 2026-06-30 | Initial fold (M1.5). | — |
+| 2 | 2026-07-02 | **M1.7.2 (design D4):** `apply()` now derives `metadata.state_version` from `event.metadata.seq`, making projection the single authority for `state_version`. The same previously-valid log folds to a different state (states formerly retained the default `state_version = 0`), which is exactly the policy's "MUST bump" case. | No stored states exist pre-release; any state stamped `projection_version = 1` is refreshed by re-projecting its log. |

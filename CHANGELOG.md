@@ -9,6 +9,15 @@ first tagged release.
 
 ### M1.7 — Concurrency, Versioning & Corrections — in progress
 #### Changed
+- **M1.7.2 (design D4) — fold-derived `state_version`; `PROJECTION_VERSION` 1 → 2:**
+  `apply()` now unconditionally derives `metadata.state_version` from
+  `event.metadata.seq`, making projection the single authority for `state_version`
+  (`project(log).metadata.state_version == last event's seq`; `0` for the empty
+  log). Because the same previously-valid log now folds to a different state, this
+  is the policy-mandated first bump of `PROJECTION_VERSION` (see
+  `docs/architecture/projection-versioning.md` §Version history). **Migration:**
+  no stored states exist pre-release; re-project any `projection_version = 1`
+  state from its log. Projection remains pure, deterministic, and IO-free.
 - **M1.7.1 (design D1) — snapshot semantics:** `Engagement.get_state()` now returns
   a **detached deep snapshot** and `Engagement.from_state()` deep-copies on ingest.
   No caller ever holds an alias of the internal state; mutating a snapshot (nested
