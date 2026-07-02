@@ -9,7 +9,3 @@ from __future__ import annotations
 
 class StratAgentError(Exception):
     """Base class for all StratAgent errors."""
-
-
-class StateValidationError(StratAgentError):
-    """Raised when Engagement State violates an invariant. Expanded in M1."""
