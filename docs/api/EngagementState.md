@@ -97,6 +97,10 @@ begins `None` or as an empty collection and is populated over the lifecycle.
 | `confidence` | `ConfidenceReport \| None` | `None` | §23 |
 | `deliverables` | `list[Deliverable]` | `[]` | §24 |
 | `knowledge_links` | `list[KnowledgeLink]` | `[]` | §25 |
+| `phase_history` | `list[PhaseRecord]` | `[]` | §2 |
+| `quality_gates` | `list[QualityGate]` | `[]` | §2 |
+| `pending_requirements` | `list[PendingRequirement]` | `[]` | §2 |
+| `projection_version` | `int` | `0` | projection provenance (stamped by `project`) |
 
 ### `EngagementMetadata` (§1)
 `engagement_id: EngagementId` · `tenant_id: str` · `slug: str` · `created_at: datetime` (auto)
@@ -150,6 +154,11 @@ Rule: `load_bearing` → `breakeven` required.
 - **`Deliverable`** (§24): `kind: DeliverableKind` · `path: str?` · `format: str?` · `status: DeliverableStatus = pending` · `generated_at: datetime?`
 - **`KnowledgeLink`** (§25): `graph_node: str?` · `relationship: str?` · `vault_note: str?` · `tenant_id: str?`
 
+**Lifecycle audit (§2)**
+- **`PhaseRecord`**: `phase: LifecycleStatus` · `entered_at: datetime?` · `exited_at: datetime?` · `result: str?`
+- **`QualityGate`**: `gate: str` · `result: GateResult` · `by: str?` · `ts: datetime?`
+- **`PendingRequirement`** (execution blocker *or* missing information): `kind: PendingKind = other` · `description: str` · `ref: Reference?`
+
 ## Public enums
 | Enum | Values |
 |---|---|
@@ -173,6 +182,8 @@ Rule: `load_bearing` → `breakeven` required.
 | `RecommendationStatus` | draft · gated · accepted · rejected |
 | `DeliverableKind` | report · deck · model · **other** |
 | `DeliverableStatus` | pending · generated · delivered |
+| `GateResult` | pass · fail · loop |
+| `PendingKind` | human_input · information · blocker · other |
 
 ## Facade (entry point — M1.3)
 `Engagement` is the sole public entry point for Engagement State operations, and it

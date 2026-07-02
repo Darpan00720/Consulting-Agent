@@ -7,6 +7,30 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.5 — Projection — 2026-06-30
+#### Added
+- `state.projection`: a **pure, deterministic** single-event reducer (`apply`,
+  dispatched per event type via `functools.singledispatch` — one reducer per event)
+  and `project(events)` as its fold. Replay is the composition of `project`, not a
+  separate algorithm. Projection performs no validation and no IO. Internal module.
+- `projection_version` on `EngagementState`; `PROJECTION_VERSION` stamps projected
+  states.
+- Baseline projection benchmarks (`pytest-benchmark`) at 10 / 100 / 1,000 / 10,000
+  events, part of the automated suite.
+#### Changed
+- **ADR-002 implementation correction:** added the §2 lifecycle-audit fields to
+  `EngagementState` — `phase_history`, `quality_gates`, and `pending_requirements`
+  (broadened from the ADR's `blocked_on` to cover both execution blockers and
+  missing information) — with models `PhaseRecord`, `QualityGate`,
+  `PendingRequirement` and enums `GateResult`, `PendingKind`.
+- `project(events)` always returns an `EngagementState` (empty log → empty state) —
+  no `Optional`.
+- `EngagementCreated.created_by` tightened to `Literal["human", "system"]` for
+  consistency with `EngagementMetadata`.
+#### Notes
+- Determinism is guaranteed: objects created during projection derive their ids and
+  timestamps from the event — never minted fresh. 71 tests; projection 99%; green gate.
+
 ### M1.4 — Event Model + Identifier Harmonization — 2026-06-30
 #### Added
 - Event model: `EventMetadata` (business `occurred_at` + system `recorded_at`;
