@@ -7,6 +7,34 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.6 — Invariants & Validation — 2026-07-02
+#### Added
+- `state.validation`: state invariant checking **separate from projection**. Rules
+  are grouped into five registries — **Structural, Lifecycle, Referential, Business,
+  Governance** (ADR-002 §Validation Rules). Each validator is a pure, independent
+  `EngagementState -> list[Finding]`; orchestration lives only in the runner.
+- First-class `ValidationRule` metadata (rule id, group, `ViolationSeverity`
+  = INFO/WARNING/ERROR/FATAL, ADR reference, description, validator) — every rule is
+  classified.
+- `validate(state)` returns a `ValidationReport` (overall validity, per-severity
+  counts, duration, groups checked, violations); `raise_if_invalid` raises
+  `StateValidationError` on blocking (ERROR/FATAL) violations. Every `Violation`
+  carries rule id, severity, group, path, offending object id (where applicable), and
+  a human-readable message.
+- Traceability generated from the rule registry into both
+  `docs/implementation/traceability-ADR-002.md` and a machine-readable
+  `traceability.json` (`make traceability`): one row per rule, **Rule → Validator →
+  Test(s)**. Rule ids are a **frozen namespace** — never reused or renumbered.
+- Baseline validation benchmarks over small and large Engagement States
+  (10 / 100 / 1,000 / 10,000 objects), part of the automated suite.
+#### Changed
+- Moved `StateValidationError` from `common.errors` into `state.validation` (it now
+  carries the `ValidationReport`); `common.errors` keeps only `StratAgentError`.
+#### Notes
+- Validation is internal (surfaced via the facade in a later milestone). Concurrency,
+  versioning, persistence, and replay remain owned by M1.7. 110 tests; validation
+  package 100%; green gate.
+
 ### M1.5 — Projection — 2026-06-30
 #### Added
 - `state.projection`: a **pure, deterministic** single-event reducer (`apply`,
