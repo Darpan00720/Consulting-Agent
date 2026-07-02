@@ -17,6 +17,14 @@
         "CLAUDE_FLOW_MEMORY_BACKEND": "hybrid"
       },
       "autoStart": false
+    },
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": [
+        "--graph",
+        "knowledge-vault/graphify-out/graph.json"
+      ],
+      "autoStart": false
     }
   }
 }

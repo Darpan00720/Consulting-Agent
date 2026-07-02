@@ -1,4 +1,4 @@
-.PHONY: install fmt lint format typecheck test cov schema traceability check hooks
+.PHONY: install fmt lint format typecheck test cov schema traceability check hooks vault-index
 
 install:
 	uv sync
@@ -26,6 +26,11 @@ schema:
 
 traceability:
 	PYTHONPATH=packages uv run python scripts/generate_traceability.py
+
+# Reindex the knowledge vault ONLY (ADR-003). Never point graphify at packages/.
+# Runs from inside the vault so caches/outputs stay in knowledge-vault/graphify-out.
+vault-index:
+	cd knowledge-vault && graphify update . --force
 
 # Canonical M0 quality gate.
 check: lint format typecheck test

@@ -31,3 +31,6 @@ node_modules/
 .claude-flow/sessions/
 .swarm/
 ruvector.db
+
+# Graphify vault index outputs (regenerable via 'make vault-index')
+knowledge-vault/graphify-out/
