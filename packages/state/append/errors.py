@@ -22,6 +22,7 @@ class AppendErrorCode(StrEnum):
 
     VERSION_CONFLICT = "version_conflict"
     EVENT_ADMISSION = "event_admission"
+    APPEND_UNSUPPORTED = "append_unsupported"
 
 
 class AppendError(StratAgentError):
@@ -58,4 +59,22 @@ class EventAdmissionError(AppendError):
         super().__init__(
             f"event not admitted: {reason}{suffix}",
             error_code=AppendErrorCode.EVENT_ADMISSION,
+        )
+
+
+class AppendUnsupportedError(AppendError):
+    """This engagement does not currently support appends (no event log).
+
+    Raised by read-only adoptions (``from_state``/``from_json``): the
+    candidates may be flawless — the engagement lacks the capability. This
+    restriction is temporary: M1.8 introduces persisted event logs and M1.9
+    replay-backed engagements remove the limitation.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "append requires an event log: engagements adopted via "
+            "from_state()/from_json() are read-only until persisted logs "
+            "(M1.8) and replay (M1.9) exist",
+            error_code=AppendErrorCode.APPEND_UNSUPPORTED,
         )

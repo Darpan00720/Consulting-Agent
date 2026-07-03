@@ -19,6 +19,15 @@ no ``Committed`` snapshots (P21/P23: that is ``make_committed``'s monopoly).
 Commit gate (severity semantics, **not** ``report.valid``): a candidate
 commits iff its ERROR count == 0 and FATAL count == 0. INFO and WARNING never
 block and are returned in ``AppendResult.warnings``.
+
+Append capability (``append_supported``, invariant P24): the facade owns
+provenance, the pipeline owns capability — the flag is always supplied
+explicitly at construction and is never inferred from state, version numbers,
+or log contents. When it is False, appends raise ``AppendUnsupportedError``
+before any phase executes. This restriction is temporary: M1.8 introduces
+persisted event logs, M1.9 replay-backed engagements remove this limitation,
+and the ``append_supported`` flag exists solely during the transition period —
+it is not permanent architecture.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from state.append.commit import CandidateCommit, Committed, StateUpdater, make_committed
+from state.append.errors import AppendUnsupportedError
 from state.append.guard import check_append
 from state.append.result import AppendResult
 from state.append.sequencing import stamp
@@ -57,8 +67,10 @@ class AppendPipeline:
         initial_state: EngagementState,
         *,
         log: Sequence[Event] = (),
+        append_supported: bool = True,
         updater_cls: type[StateUpdater] = StateUpdater,
     ) -> None:
+        self._append_supported = append_supported
         genesis = CandidateCommit(
             log=tuple(log),
             state=initial_state,
@@ -72,6 +84,11 @@ class AppendPipeline:
     def updater(self) -> StateUpdater:
         """The commit point (exposed for S5 wiring and test doubles)."""
         return self._updater
+
+    @property
+    def append_supported(self) -> bool:
+        """Whether appends are currently supported (capability, not provenance)."""
+        return self._append_supported
 
     def committed(self) -> Committed:
         """The current committed snapshot."""
@@ -88,6 +105,10 @@ class AppendPipeline:
         return self._append(list(events), expected_version)
 
     def _append(self, events: list[Event], expected_version: int) -> AppendResult:
+        # Capability boundary (P24): an unsupported pipeline never enters the
+        # phase machine — nothing decided, allocated, folded, judged, committed.
+        if not self._append_supported:
+            raise AppendUnsupportedError()
         snapshot = self._updater.read()
         # Phase 1 — Decision (S3)
         decision = check_append(

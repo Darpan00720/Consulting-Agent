@@ -15,6 +15,7 @@ from state.append.commit import (
 from state.append.errors import (
     AppendError,
     AppendErrorCode,
+    AppendUnsupportedError,
     EventAdmissionError,
     VersionConflictError,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "AppendErrorCode",
     "AppendPipeline",
     "AppendResult",
+    "AppendUnsupportedError",
     "CandidateCommit",
     "Committed",
     "EventAdmissionError",

@@ -71,9 +71,11 @@ def test_event_admission_error_without_event_id() -> None:
 
 
 def test_error_codes_are_a_frozen_namespace() -> None:
+    # additive-frozen: values never change or vanish; S5 added append_unsupported
     assert {code.value for code in AppendErrorCode} == {
         "version_conflict",
         "event_admission",
+        "append_unsupported",
     }
 
 

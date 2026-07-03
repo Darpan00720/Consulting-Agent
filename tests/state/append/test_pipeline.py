@@ -352,3 +352,43 @@ def test_p23_no_alternative_committed_construction_path() -> None:
             if hits:
                 offenders[path.name] = hits
     assert offenders == {"commit.py": 1}, offenders
+
+
+def test_p24_append_unsupported_short_circuits_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from state.append import AppendUnsupportedError
+    from state.append.errors import AppendErrorCode
+
+    p = AppendPipeline(
+        _initial_state(), append_supported=False, updater_cls=SpyStateUpdater
+    )
+    spy = cast(SpyStateUpdater, p.updater)
+    before = p.committed()
+    calls: dict[str, int] = {"guard": 0, "stamp": 0, "apply": 0, "validate": 0}
+
+    def _record(name: str) -> Any:
+        def recorder(*args: Any, **kwargs: Any) -> Any:
+            calls[name] += 1
+            raise AssertionError(f"{name} must not execute (P24)")
+
+        return recorder
+
+    monkeypatch.setattr(pipeline_module, "check_append", _record("guard"))
+    monkeypatch.setattr(pipeline_module, "stamp", _record("stamp"))
+    monkeypatch.setattr(pipeline_module, "apply", _record("apply"))
+    monkeypatch.setattr(pipeline_module, "validate", _record("validate"))
+
+    for attempt in ("event", "events"):
+        with pytest.raises(AppendUnsupportedError) as excinfo:
+            if attempt == "event":
+                p.append_event(_created(), expected_version=0)
+            else:
+                p.append_events([_created()], expected_version=0)
+        assert excinfo.value.error_code is AppendErrorCode.APPEND_UNSUPPORTED
+
+    assert calls == {"guard": 0, "stamp": 0, "apply": 0, "validate": 0}
+    assert spy.commit_count == 0
+    after = p.committed()
+    assert after is before
+    assert after.state.model_dump_json() == before.state.model_dump_json()
