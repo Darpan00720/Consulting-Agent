@@ -26,6 +26,24 @@ first tagged release.
   stays reserved for the public append API. 18 dedicated invariant tests
   (A1–A8, V1–V7, C1–C3). These modules are arithmetic only; correctness is
   established by S3 admission, the S4 pipeline, and M1.7.4 replay integrity.
+- **M1.7.3-S5 — facade event API** (wiring layer only): `Engagement` gains
+  `append_event`, `append_events`, `current_version` (reads the stored
+  S2-computed committed version), and `current_sequence` (delegates to S2);
+  `validate()` now returns the M1.6 `ValidationReport` unaltered (design D5);
+  `EngagementProtocol` extended in lockstep. Public exports added: the append
+  result/error contracts (`AppendResult`, `AppendError`, `AppendErrorCode`,
+  `VersionConflictError`, `EventAdmissionError`, `AppendUnsupportedError`) and
+  the validation surface (`ValidationReport`, `Violation`, `ViolationSeverity`,
+  `ValidationGroup`, `StateValidationError`). **Temporary append availability
+  (P24):** `create()` → append supported; replay (M1.9) → supported;
+  `from_state()`/`from_json()` → **read-only** — appends raise
+  `AppendUnsupportedError` (stable code `append_unsupported`) before any
+  pipeline phase executes, because a log-less adopted state must never
+  fabricate sequence numbers or reset versions. The pipeline knows its
+  capability explicitly (`append_supported`, supplied by the facade's
+  provenance — never inferred from state/versions/log contents). This
+  restriction is temporary: M1.8 persisted logs and M1.9 replay remove it.
+  Invariants F1–F10 + P24, one dedicated test each.
 - **M1.7.3-S4 — atomic append pipeline + commit point** (orchestration only):
   `AppendPipeline.append_event / append_events` run the **fixed contractual
   phase order — Decision → Allocation → Projection → Validation → Commit** —

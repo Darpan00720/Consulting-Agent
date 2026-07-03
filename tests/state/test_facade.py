@@ -206,6 +206,11 @@ def test_facade_public_api_is_frozen() -> None:
         "get_state",
         "validate",
         "to_json",
+        # M1.7.3-S5: the M1.3-reserved event API extension
+        "append_event",
+        "append_events",
+        "current_version",
+        "current_sequence",
     }
 
 
@@ -213,6 +218,19 @@ EXPECTED_PUBLIC_API = {
     # facade
     "Engagement",
     "EngagementProtocol",
+    # append API (M1.7.3-S5)
+    "AppendError",
+    "AppendErrorCode",
+    "AppendResult",
+    "AppendUnsupportedError",
+    "EventAdmissionError",
+    "VersionConflictError",
+    # validation surface (M1.7.3-S5)
+    "StateValidationError",
+    "ValidationGroup",
+    "ValidationReport",
+    "Violation",
+    "ViolationSeverity",
     # root
     "EngagementState",
     "EngagementMetadata",

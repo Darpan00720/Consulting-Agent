@@ -10,6 +10,14 @@ from __future__ import annotations
 
 from common.models import DomainObject
 from common.values import ConfidenceScore, Identifier, Reference, new_id
+from state.append import (
+    AppendError,
+    AppendErrorCode,
+    AppendResult,
+    AppendUnsupportedError,
+    EventAdmissionError,
+    VersionConflictError,
+)
 from state.enums import LifecycleStatus
 from state.events import (
     EVENT_CATEGORIES,
@@ -81,11 +89,31 @@ from state.sections.scoping import (
     ProblemDefinition,
     Stakeholder,
 )
+from state.validation import (
+    StateValidationError,
+    ValidationGroup,
+    ValidationReport,
+    Violation,
+    ViolationSeverity,
+)
 
 __all__ = [
     # Facade
     "Engagement",
     "EngagementProtocol",
+    # Append API (M1.7.3-S5)
+    "AppendError",
+    "AppendErrorCode",
+    "AppendResult",
+    "AppendUnsupportedError",
+    "EventAdmissionError",
+    "VersionConflictError",
+    # Validation surface (M1.7.3-S5)
+    "StateValidationError",
+    "ValidationGroup",
+    "ValidationReport",
+    "Violation",
+    "ViolationSeverity",
     # Root
     "EngagementState",
     "EngagementMetadata",
