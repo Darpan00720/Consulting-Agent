@@ -57,3 +57,112 @@ One row per validation rule: **Rule → Validator → Test(s)**. Rule ids are a
 | Analysis gate only Reviewer; recommendation gate only Challenger; final acceptance Human | deferred | role registry — M6 (TD-003; QualityGate.by already captured) |
 | No agent may approve its own output | deferred | role registry — M6 (TD-003) |
 | A rejection must carry an actionable required_fix | registry | GOV-002 (+GOV-003) |
+
+## Ownership (M1.7.6 — data only; enforcement owner: M6 Agent Manager)
+
+### Component ownership
+
+| Component | Owner | Writes | Enforcement | Status |
+|---|---|---|---|---|
+| Facade (Engagement) | S5 wiring layer | — | tests today (S6 freeze, F-suite) | verified |
+| AppendPipeline | S4 orchestration | candidate commit | tests today (P-suite) | verified |
+| StateUpdater | S4 commit point | committed snapshot | tests today; M1.8 preserves the atomic-commit invariant | verified |
+| Projection (apply/project) | M1.5 / M1.7.2 | — | tests today (projection suite) | verified |
+| Validation Runner | M1.6 | validation report | tests today | verified |
+| Validation Registry (5 groups) | M1.6 / M1.7.5 | — | tests today | verified |
+| Replay Integrity | M1.7.4 | — | tests today; M1.8/M1.9 call sites | verified |
+| Sequence Allocator | S2 arithmetic | stamped event copies | tests today | verified |
+| Version Manager (versioning) | S2 arithmetic | — | tests today | verified |
+| Concurrency Guard | S3 decisions | — | tests today | verified |
+| Traceability Generator | tooling (make traceability) | traceability artifacts | tests today | verified |
+| State Models | M1.2 | — | tests today | verified |
+| Events | M1.4 | — | by construction + tests | verified |
+| Event Metadata (seq) | S2-stamped envelope field | — | tests today | verified |
+| Knowledge Layer (vault/Graphify) | ADR-003 (M2/M3) | knowledge vault, vault graph | M2 governance lint; M9 Curator | verified |
+| Agent Manager (M6, future) | ADR-005 executive | — | M6 (itself) | design |
+
+### ADR-002 section ownership (agent roles)
+
+| Section | Fields | Write | Update | Approve | Reject |
+|---|---|---|---|---|---|
+| Engagement Metadata | metadata | manager | manager | — | — |
+| Lifecycle Status | status, phase_history, quality_gates, pending_requirements | manager | manager | — | — |
+| Problem Definition | problem | classifier | classifier, human | human | human |
+| Objectives | objectives, success_criteria | classifier | classifier, human | human | human |
+| Constraints | constraints | classifier | classifier, human | human | human |
+| Stakeholders | stakeholders | classifier | classifier | — | — |
+| Case Classification | classification | classifier | classifier, manager | manager, human | human |
+| Information Gaps | information_gaps | gap_agent | gap_agent, analysts, human | human | human |
+| Assumption Ledger | assumptions | analysts, gap_agent | owner | reviewer | reviewer, challenger |
+| Engagement Plan | plan | planner | planner, manager | — | — |
+| Framework Selection | frameworks | framework_selector | framework_selector | reviewer | reviewer, challenger |
+| Issue Tree | issue_tree | issue_tree_generator | issue_tree_generator, analysts | reviewer | reviewer |
+| Knowledge References | knowledge_references | knowledge_agent | knowledge_agent | — | — |
+| Evidence Ledger | evidence | analysts, knowledge_agent | owner | reviewer | reviewer |
+| Financial Analysis | financial_analysis | financial_analyst | financial_analyst | reviewer | reviewer, challenger |
+| Market Analysis | market_analysis | market_analyst | market_analyst | reviewer | reviewer, challenger |
+| Operations Analysis | operations_analysis | operations_analyst | operations_analyst | reviewer | reviewer, challenger |
+| Strategy Analysis | strategy_analysis | strategy_analyst | strategy_analyst | reviewer | reviewer, challenger |
+| Risk Analysis | risk_analysis | risk_analyst | risk_analyst | reviewer | reviewer, challenger |
+| Reviewer Notes | reviewer_notes | reviewer | reviewer | reviewer | reviewer |
+| Challenge Notes | challenge_notes | challenger | challenger | challenger | challenger |
+| Recommendations | recommendations | report_writer | report_writer | human, manager | challenger, reviewer, human |
+| Confidence Scores | confidence | owner | report_writer, manager | — | — |
+| Deliverables | deliverables | report_writer | report_writer | human | — |
+| Knowledge Links | knowledge_links | knowledge_curator | knowledge_curator | — | — |
+| Audit Trail | — | all | — | — | — |
+| Projection Provenance | projection_version | system | — | — | — |
+
+### Event ownership (event → writer roles → sections)
+
+| Event type | Writers | Sections |
+|---|---|---|
+| engagement_created | manager | Engagement Metadata, Lifecycle Status |
+| problem_defined | classifier | Problem Definition |
+| problem_updated | classifier, human | Problem Definition |
+| objectives_recorded | classifier | Objectives |
+| constraints_recorded | classifier | Constraints |
+| stakeholders_recorded | classifier | Stakeholders |
+| case_classified | classifier | Case Classification |
+| case_reclassified | classifier, manager | Case Classification |
+| information_gap_identified | gap_agent | Information Gaps |
+| gap_answered | human, knowledge_agent | Information Gaps |
+| gap_assumed | gap_agent, analysts | Information Gaps, Assumption Ledger |
+| assumption_added | analysts | Assumption Ledger |
+| assumption_updated | owner | Assumption Ledger |
+| assumption_invalidated | reviewer, challenger | Assumption Ledger |
+| engagement_plan_created | planner | Engagement Plan |
+| engagement_replanned | planner | Engagement Plan |
+| framework_selected | framework_selector | Framework Selection |
+| framework_deselected | framework_selector, reviewer | Framework Selection |
+| issue_tree_generated | issue_tree_generator | Issue Tree |
+| issue_tree_node_updated | issue_tree_generator, analysts | Issue Tree |
+| knowledge_retrieved | knowledge_agent | Knowledge References |
+| evidence_added | analysts, knowledge_agent | Evidence Ledger |
+| evidence_validated | reviewer | Evidence Ledger |
+| evidence_rejected | reviewer | Evidence Ledger |
+| evidence_marked_stale | reviewer, system | Evidence Ledger |
+| specialist_analysis_started | analysts | Financial Analysis, Market Analysis, Operations Analysis, Strategy Analysis, Risk Analysis |
+| finding_recorded | analysts | Financial Analysis, Market Analysis, Operations Analysis, Strategy Analysis, Risk Analysis |
+| specialist_analysis_completed | analysts | Financial Analysis, Market Analysis, Operations Analysis, Strategy Analysis, Risk Analysis |
+| reviewer_reviewed | reviewer | Reviewer Notes |
+| reviewer_approved | reviewer | Reviewer Notes, Lifecycle Status |
+| reviewer_rejected | reviewer | Reviewer Notes, Lifecycle Status |
+| challenge_recorded | challenger | Challenge Notes |
+| challenger_cleared | challenger | Challenge Notes, Lifecycle Status |
+| challenger_rejected | challenger | Challenge Notes, Lifecycle Status |
+| recommendation_drafted | report_writer | Recommendations |
+| confidence_scored | report_writer, manager | Confidence Scores |
+| recommendation_accepted | human, manager | Recommendations |
+| report_generated | report_writer | Deliverables |
+| deck_generated | report_writer | Deliverables |
+| model_generated | report_writer | Deliverables |
+| human_input_requested | manager | Lifecycle Status |
+| human_input_provided | human | Lifecycle Status |
+| phase_transitioned | manager | Lifecycle Status |
+| engagement_completed | manager | Lifecycle Status |
+| engagement_failed | system | Lifecycle Status |
+| engagement_aborted | human | Lifecycle Status |
+| lesson_captured | knowledge_curator | Knowledge Links |
+| knowledge_graph_linked | knowledge_curator | Knowledge Links |
+| profile_updated | knowledge_curator | Knowledge Links |

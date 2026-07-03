@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from state.ownership import COMPONENT_OWNERSHIP, EVENT_OWNERSHIP, SECTION_OWNERSHIP
 from state.validation import ALL_RULES
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -191,8 +193,23 @@ DISPOSITIONS: list[dict[str, str]] = [
 ]
 
 
+def _ownership_payload() -> dict[str, Any]:
+    return {
+        "components": [asdict(row) for row in COMPONENT_OWNERSHIP],
+        "sections": [asdict(row) for row in SECTION_OWNERSHIP],
+        "events": [
+            {"event_type": event_type.value, **asdict(ownership)}
+            for event_type, ownership in EVENT_OWNERSHIP.items()
+        ],
+    }
+
+
 def render_json(data: list[dict[str, Any]]) -> str:
-    document = {"rules": data, "dispositions": DISPOSITIONS}
+    document = {
+        "rules": data,
+        "dispositions": DISPOSITIONS,
+        "ownership": _ownership_payload(),
+    }
     return json.dumps(document, indent=2) + "\n"
 
 
@@ -223,6 +240,46 @@ def render_markdown(data: list[dict[str, Any]]) -> str:
     for item in DISPOSITIONS:
         lines.append(
             f"| {item['adr_item']} | {item['disposition']} | {item['mechanism']} |"
+        )
+    lines += [
+        "",
+        "## Ownership (M1.7.6 — data only; enforcement owner: M6 Agent Manager)",
+        "",
+        "### Component ownership",
+        "",
+        "| Component | Owner | Writes | Enforcement | Status |",
+        "|---|---|---|---|---|",
+    ]
+    for comp in COMPONENT_OWNERSHIP:
+        writes = ", ".join(comp.writes) or "—"
+        lines.append(
+            f"| {comp.component} | {comp.owner} | {writes} | "
+            f"{comp.enforcement} | {comp.status} |"
+        )
+    lines += [
+        "",
+        "### ADR-002 section ownership (agent roles)",
+        "",
+        "| Section | Fields | Write | Update | Approve | Reject |",
+        "|---|---|---|---|---|---|",
+    ]
+    for sec in SECTION_OWNERSHIP:
+        lines.append(
+            f"| {sec.section} | {', '.join(sec.fields) or '—'} | "
+            f"{', '.join(sec.write) or '—'} | {', '.join(sec.update) or '—'} | "
+            f"{', '.join(sec.approve) or '—'} | {', '.join(sec.reject) or '—'} |"
+        )
+    lines += [
+        "",
+        "### Event ownership (event → writer roles → sections)",
+        "",
+        "| Event type | Writers | Sections |",
+        "|---|---|---|",
+    ]
+    for event_type, ownership in EVENT_OWNERSHIP.items():
+        lines.append(
+            f"| {event_type.value} | {', '.join(ownership.writers)} | "
+            f"{', '.join(ownership.sections)} |"
         )
     return "\n".join(lines) + "\n"
 

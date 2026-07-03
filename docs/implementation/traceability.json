@@ -371,5 +371,1210 @@
       "disposition": "registry",
       "mechanism": "GOV-002 (+GOV-003)"
     }
-  ]
+  ],
+  "ownership": {
+    "components": [
+      {
+        "component": "Facade (Engagement)",
+        "owner": "S5 wiring layer",
+        "reads": [
+          "committed snapshot"
+        ],
+        "writes": [],
+        "reason": "wiring owns provenance, never data; delegates only",
+        "evidence": "F1-F3, F7; facade module contract",
+        "enforcement": "tests today (S6 freeze, F-suite)",
+        "status": "verified"
+      },
+      {
+        "component": "AppendPipeline",
+        "owner": "S4 orchestration",
+        "reads": [
+          "committed snapshot"
+        ],
+        "writes": [
+          "candidate commit"
+        ],
+        "reason": "fixed phase order; no arithmetic (P17), no rules (P19)",
+        "evidence": "P1-P20; pipeline module contract",
+        "enforcement": "tests today (P-suite)",
+        "status": "verified"
+      },
+      {
+        "component": "StateUpdater",
+        "owner": "S4 commit point",
+        "reads": [
+          "committed snapshot"
+        ],
+        "writes": [
+          "committed snapshot"
+        ],
+        "reason": "the single mutation point: make_committed + one reference swap",
+        "evidence": "P9, P21-P23; commit module contract",
+        "enforcement": "tests today; M1.8 preserves the atomic-commit invariant",
+        "status": "verified"
+      },
+      {
+        "component": "Projection (apply/project)",
+        "owner": "M1.5 / M1.7.2",
+        "reads": [
+          "events",
+          "state (pure input)"
+        ],
+        "writes": [],
+        "reason": "pure fold; sole deriving authority for state_version",
+        "evidence": "M1.5 purity/determinism tests; M1.7.2 stamp tests",
+        "enforcement": "tests today (projection suite)",
+        "status": "verified"
+      },
+      {
+        "component": "Validation Runner",
+        "owner": "M1.6",
+        "reads": [
+          "state"
+        ],
+        "writes": [
+          "validation report"
+        ],
+        "reason": "the only orchestrator of rules; mints ValidationReport",
+        "evidence": "M1.6 runner tests; P19 (pipeline uses runner only)",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Validation Registry (5 groups)",
+        "owner": "M1.6 / M1.7.5",
+        "reads": [
+          "state"
+        ],
+        "writes": [],
+        "reason": "pure findings; rules decide, never act",
+        "evidence": "registry architecture + per-rule tests",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Replay Integrity",
+        "owner": "M1.7.4",
+        "reads": [
+          "log",
+          "snapshot"
+        ],
+        "writes": [],
+        "reason": "verifies, never repairs (no renumbering, no synthesis)",
+        "evidence": "R1-R18 tests; integrity module contract",
+        "enforcement": "tests today; M1.8/M1.9 call sites",
+        "status": "verified"
+      },
+      {
+        "component": "Sequence Allocator",
+        "owner": "S2 arithmetic",
+        "reads": [
+          "unassigned events"
+        ],
+        "writes": [
+          "stamped event copies"
+        ],
+        "reason": "arithmetic only; sole assigner of seq (once, at allocation)",
+        "evidence": "A1-A8; sequencing module contract",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Version Manager (versioning)",
+        "owner": "S2 arithmetic",
+        "reads": [
+          "event metadata"
+        ],
+        "writes": [],
+        "reason": "pure derivation from event metadata only",
+        "evidence": "V1-V7; P17/P18",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Concurrency Guard",
+        "owner": "S3 decisions",
+        "reads": [
+          "committed facts",
+          "candidate events"
+        ],
+        "writes": [],
+        "reason": "returns decisions; never mutates, allocates, or validates",
+        "evidence": "G1-G16; guard module contract",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Traceability Generator",
+        "owner": "tooling (make traceability)",
+        "reads": [
+          "rule registry",
+          "test tree",
+          "ownership datasets"
+        ],
+        "writes": [
+          "traceability artifacts"
+        ],
+        "reason": "generated-artifact discipline: sole writer of the matrix docs",
+        "evidence": "generator + freshness/completeness tests",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "State Models",
+        "owner": "M1.2",
+        "reads": [],
+        "writes": [],
+        "reason": "no at-rest mutation path: snapshots are detached (D1); the only evolution is the append pipeline",
+        "evidence": "M1.7.1 snapshot suite; F6",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Events",
+        "owner": "M1.4",
+        "reads": [],
+        "writes": [],
+        "reason": "frozen models; the log is append-only by all, mutable by none",
+        "evidence": "frozen configs; ADR-002 audit-trail row; R-tests",
+        "enforcement": "by construction + tests",
+        "status": "verified"
+      },
+      {
+        "component": "Event Metadata (seq)",
+        "owner": "S2-stamped envelope field",
+        "reads": [],
+        "writes": [],
+        "reason": "written exactly once, at allocation, by the Sequence Allocator; never re-stamped (A7/A8, R5)",
+        "evidence": "S2 + integrity tests",
+        "enforcement": "tests today",
+        "status": "verified"
+      },
+      {
+        "component": "Knowledge Layer (vault/Graphify)",
+        "owner": "ADR-003 (M2/M3)",
+        "reads": [
+          "vault content",
+          "vault graph"
+        ],
+        "writes": [
+          "knowledge vault",
+          "vault graph"
+        ],
+        "reason": "humans + Curator (M9) author the vault; only 'make vault-index' rebuilds the graph; zero interaction with state",
+        "evidence": "0 cross-imports; ADR-003; Graphify installation review",
+        "enforcement": "M2 governance lint; M9 Curator",
+        "status": "verified"
+      },
+      {
+        "component": "Agent Manager (M6, future)",
+        "owner": "ADR-005 executive",
+        "reads": [
+          "whole state"
+        ],
+        "writes": [],
+        "reason": "will own lifecycle writes and serialize transitions per ADR-002; enforcement owner for every role-based rule (TD-003)",
+        "evidence": "ADR-002 matrix; ADR-005 \u00a73 Executive; TD-003 deferral",
+        "enforcement": "M6 (itself)",
+        "status": "design"
+      }
+    ],
+    "sections": [
+      {
+        "section": "Engagement Metadata",
+        "fields": [
+          "metadata"
+        ],
+        "write": [
+          "manager"
+        ],
+        "update": [
+          "manager"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Lifecycle Status",
+        "fields": [
+          "status",
+          "phase_history",
+          "quality_gates",
+          "pending_requirements"
+        ],
+        "write": [
+          "manager"
+        ],
+        "update": [
+          "manager"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": "ADR-002 \u00a72 audit fields included (M1.5 implementation correction)"
+      },
+      {
+        "section": "Problem Definition",
+        "fields": [
+          "problem"
+        ],
+        "write": [
+          "classifier"
+        ],
+        "update": [
+          "classifier",
+          "human"
+        ],
+        "approve": [
+          "human"
+        ],
+        "reject": [
+          "human"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Objectives",
+        "fields": [
+          "objectives",
+          "success_criteria"
+        ],
+        "write": [
+          "classifier"
+        ],
+        "update": [
+          "classifier",
+          "human"
+        ],
+        "approve": [
+          "human"
+        ],
+        "reject": [
+          "human"
+        ],
+        "adr": true,
+        "note": "success criteria are part of ADR-002 \u00a74 Objectives"
+      },
+      {
+        "section": "Constraints",
+        "fields": [
+          "constraints"
+        ],
+        "write": [
+          "classifier"
+        ],
+        "update": [
+          "classifier",
+          "human"
+        ],
+        "approve": [
+          "human"
+        ],
+        "reject": [
+          "human"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Stakeholders",
+        "fields": [
+          "stakeholders"
+        ],
+        "write": [
+          "classifier"
+        ],
+        "update": [
+          "classifier"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Case Classification",
+        "fields": [
+          "classification"
+        ],
+        "write": [
+          "classifier"
+        ],
+        "update": [
+          "classifier",
+          "manager"
+        ],
+        "approve": [
+          "manager",
+          "human"
+        ],
+        "reject": [
+          "human"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Information Gaps",
+        "fields": [
+          "information_gaps"
+        ],
+        "write": [
+          "gap_agent"
+        ],
+        "update": [
+          "gap_agent",
+          "analysts",
+          "human"
+        ],
+        "approve": [
+          "human"
+        ],
+        "reject": [
+          "human"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Assumption Ledger",
+        "fields": [
+          "assumptions"
+        ],
+        "write": [
+          "analysts",
+          "gap_agent"
+        ],
+        "update": [
+          "owner"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Engagement Plan",
+        "fields": [
+          "plan"
+        ],
+        "write": [
+          "planner"
+        ],
+        "update": [
+          "planner",
+          "manager"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Framework Selection",
+        "fields": [
+          "frameworks"
+        ],
+        "write": [
+          "framework_selector"
+        ],
+        "update": [
+          "framework_selector"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Issue Tree",
+        "fields": [
+          "issue_tree"
+        ],
+        "write": [
+          "issue_tree_generator"
+        ],
+        "update": [
+          "issue_tree_generator",
+          "analysts"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Knowledge References",
+        "fields": [
+          "knowledge_references"
+        ],
+        "write": [
+          "knowledge_agent"
+        ],
+        "update": [
+          "knowledge_agent"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Evidence Ledger",
+        "fields": [
+          "evidence"
+        ],
+        "write": [
+          "analysts",
+          "knowledge_agent"
+        ],
+        "update": [
+          "owner"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Financial Analysis",
+        "fields": [
+          "financial_analysis"
+        ],
+        "write": [
+          "financial_analyst"
+        ],
+        "update": [
+          "financial_analyst"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Market Analysis",
+        "fields": [
+          "market_analysis"
+        ],
+        "write": [
+          "market_analyst"
+        ],
+        "update": [
+          "market_analyst"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Operations Analysis",
+        "fields": [
+          "operations_analysis"
+        ],
+        "write": [
+          "operations_analyst"
+        ],
+        "update": [
+          "operations_analyst"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Strategy Analysis",
+        "fields": [
+          "strategy_analysis"
+        ],
+        "write": [
+          "strategy_analyst"
+        ],
+        "update": [
+          "strategy_analyst"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Risk Analysis",
+        "fields": [
+          "risk_analysis"
+        ],
+        "write": [
+          "risk_analyst"
+        ],
+        "update": [
+          "risk_analyst"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer",
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Reviewer Notes",
+        "fields": [
+          "reviewer_notes"
+        ],
+        "write": [
+          "reviewer"
+        ],
+        "update": [
+          "reviewer"
+        ],
+        "approve": [
+          "reviewer"
+        ],
+        "reject": [
+          "reviewer"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Challenge Notes",
+        "fields": [
+          "challenge_notes"
+        ],
+        "write": [
+          "challenger"
+        ],
+        "update": [
+          "challenger"
+        ],
+        "approve": [
+          "challenger"
+        ],
+        "reject": [
+          "challenger"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Recommendations",
+        "fields": [
+          "recommendations"
+        ],
+        "write": [
+          "report_writer"
+        ],
+        "update": [
+          "report_writer"
+        ],
+        "approve": [
+          "human",
+          "manager"
+        ],
+        "reject": [
+          "challenger",
+          "reviewer",
+          "human"
+        ],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Confidence Scores",
+        "fields": [
+          "confidence"
+        ],
+        "write": [
+          "owner"
+        ],
+        "update": [
+          "report_writer",
+          "manager"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": "ADR-002: created by section owners; rolled up by Report Writer"
+      },
+      {
+        "section": "Deliverables",
+        "fields": [
+          "deliverables"
+        ],
+        "write": [
+          "report_writer"
+        ],
+        "update": [
+          "report_writer"
+        ],
+        "approve": [
+          "human"
+        ],
+        "reject": [],
+        "adr": true,
+        "note": ""
+      },
+      {
+        "section": "Knowledge Links",
+        "fields": [
+          "knowledge_links"
+        ],
+        "write": [
+          "knowledge_curator"
+        ],
+        "update": [
+          "knowledge_curator"
+        ],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": "read is tenant-scoped (ADR-002)"
+      },
+      {
+        "section": "Audit Trail",
+        "fields": [],
+        "write": [
+          "all"
+        ],
+        "update": [],
+        "approve": [],
+        "reject": [],
+        "adr": true,
+        "note": "append-only by all, mutable by none; lives in the committed log (Committed.log), not on EngagementState"
+      },
+      {
+        "section": "Projection Provenance",
+        "fields": [
+          "projection_version"
+        ],
+        "write": [
+          "system"
+        ],
+        "update": [],
+        "approve": [],
+        "reject": [],
+        "adr": false,
+        "note": "implementation field (M1.5/M1.7.2): stamped only by project(); never agent-writable"
+      }
+    ],
+    "events": [
+      {
+        "event_type": "engagement_created",
+        "writers": [
+          "manager"
+        ],
+        "sections": [
+          "Engagement Metadata",
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "problem_defined",
+        "writers": [
+          "classifier"
+        ],
+        "sections": [
+          "Problem Definition"
+        ]
+      },
+      {
+        "event_type": "problem_updated",
+        "writers": [
+          "classifier",
+          "human"
+        ],
+        "sections": [
+          "Problem Definition"
+        ]
+      },
+      {
+        "event_type": "objectives_recorded",
+        "writers": [
+          "classifier"
+        ],
+        "sections": [
+          "Objectives"
+        ]
+      },
+      {
+        "event_type": "constraints_recorded",
+        "writers": [
+          "classifier"
+        ],
+        "sections": [
+          "Constraints"
+        ]
+      },
+      {
+        "event_type": "stakeholders_recorded",
+        "writers": [
+          "classifier"
+        ],
+        "sections": [
+          "Stakeholders"
+        ]
+      },
+      {
+        "event_type": "case_classified",
+        "writers": [
+          "classifier"
+        ],
+        "sections": [
+          "Case Classification"
+        ]
+      },
+      {
+        "event_type": "case_reclassified",
+        "writers": [
+          "classifier",
+          "manager"
+        ],
+        "sections": [
+          "Case Classification"
+        ]
+      },
+      {
+        "event_type": "information_gap_identified",
+        "writers": [
+          "gap_agent"
+        ],
+        "sections": [
+          "Information Gaps"
+        ]
+      },
+      {
+        "event_type": "gap_answered",
+        "writers": [
+          "human",
+          "knowledge_agent"
+        ],
+        "sections": [
+          "Information Gaps"
+        ]
+      },
+      {
+        "event_type": "gap_assumed",
+        "writers": [
+          "gap_agent",
+          "analysts"
+        ],
+        "sections": [
+          "Information Gaps",
+          "Assumption Ledger"
+        ]
+      },
+      {
+        "event_type": "assumption_added",
+        "writers": [
+          "analysts"
+        ],
+        "sections": [
+          "Assumption Ledger"
+        ]
+      },
+      {
+        "event_type": "assumption_updated",
+        "writers": [
+          "owner"
+        ],
+        "sections": [
+          "Assumption Ledger"
+        ]
+      },
+      {
+        "event_type": "assumption_invalidated",
+        "writers": [
+          "reviewer",
+          "challenger"
+        ],
+        "sections": [
+          "Assumption Ledger"
+        ]
+      },
+      {
+        "event_type": "engagement_plan_created",
+        "writers": [
+          "planner"
+        ],
+        "sections": [
+          "Engagement Plan"
+        ]
+      },
+      {
+        "event_type": "engagement_replanned",
+        "writers": [
+          "planner"
+        ],
+        "sections": [
+          "Engagement Plan"
+        ]
+      },
+      {
+        "event_type": "framework_selected",
+        "writers": [
+          "framework_selector"
+        ],
+        "sections": [
+          "Framework Selection"
+        ]
+      },
+      {
+        "event_type": "framework_deselected",
+        "writers": [
+          "framework_selector",
+          "reviewer"
+        ],
+        "sections": [
+          "Framework Selection"
+        ]
+      },
+      {
+        "event_type": "issue_tree_generated",
+        "writers": [
+          "issue_tree_generator"
+        ],
+        "sections": [
+          "Issue Tree"
+        ]
+      },
+      {
+        "event_type": "issue_tree_node_updated",
+        "writers": [
+          "issue_tree_generator",
+          "analysts"
+        ],
+        "sections": [
+          "Issue Tree"
+        ]
+      },
+      {
+        "event_type": "knowledge_retrieved",
+        "writers": [
+          "knowledge_agent"
+        ],
+        "sections": [
+          "Knowledge References"
+        ]
+      },
+      {
+        "event_type": "evidence_added",
+        "writers": [
+          "analysts",
+          "knowledge_agent"
+        ],
+        "sections": [
+          "Evidence Ledger"
+        ]
+      },
+      {
+        "event_type": "evidence_validated",
+        "writers": [
+          "reviewer"
+        ],
+        "sections": [
+          "Evidence Ledger"
+        ]
+      },
+      {
+        "event_type": "evidence_rejected",
+        "writers": [
+          "reviewer"
+        ],
+        "sections": [
+          "Evidence Ledger"
+        ]
+      },
+      {
+        "event_type": "evidence_marked_stale",
+        "writers": [
+          "reviewer",
+          "system"
+        ],
+        "sections": [
+          "Evidence Ledger"
+        ]
+      },
+      {
+        "event_type": "specialist_analysis_started",
+        "writers": [
+          "analysts"
+        ],
+        "sections": [
+          "Financial Analysis",
+          "Market Analysis",
+          "Operations Analysis",
+          "Strategy Analysis",
+          "Risk Analysis"
+        ]
+      },
+      {
+        "event_type": "finding_recorded",
+        "writers": [
+          "analysts"
+        ],
+        "sections": [
+          "Financial Analysis",
+          "Market Analysis",
+          "Operations Analysis",
+          "Strategy Analysis",
+          "Risk Analysis"
+        ]
+      },
+      {
+        "event_type": "specialist_analysis_completed",
+        "writers": [
+          "analysts"
+        ],
+        "sections": [
+          "Financial Analysis",
+          "Market Analysis",
+          "Operations Analysis",
+          "Strategy Analysis",
+          "Risk Analysis"
+        ]
+      },
+      {
+        "event_type": "reviewer_reviewed",
+        "writers": [
+          "reviewer"
+        ],
+        "sections": [
+          "Reviewer Notes"
+        ]
+      },
+      {
+        "event_type": "reviewer_approved",
+        "writers": [
+          "reviewer"
+        ],
+        "sections": [
+          "Reviewer Notes",
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "reviewer_rejected",
+        "writers": [
+          "reviewer"
+        ],
+        "sections": [
+          "Reviewer Notes",
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "challenge_recorded",
+        "writers": [
+          "challenger"
+        ],
+        "sections": [
+          "Challenge Notes"
+        ]
+      },
+      {
+        "event_type": "challenger_cleared",
+        "writers": [
+          "challenger"
+        ],
+        "sections": [
+          "Challenge Notes",
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "challenger_rejected",
+        "writers": [
+          "challenger"
+        ],
+        "sections": [
+          "Challenge Notes",
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "recommendation_drafted",
+        "writers": [
+          "report_writer"
+        ],
+        "sections": [
+          "Recommendations"
+        ]
+      },
+      {
+        "event_type": "confidence_scored",
+        "writers": [
+          "report_writer",
+          "manager"
+        ],
+        "sections": [
+          "Confidence Scores"
+        ]
+      },
+      {
+        "event_type": "recommendation_accepted",
+        "writers": [
+          "human",
+          "manager"
+        ],
+        "sections": [
+          "Recommendations"
+        ]
+      },
+      {
+        "event_type": "report_generated",
+        "writers": [
+          "report_writer"
+        ],
+        "sections": [
+          "Deliverables"
+        ]
+      },
+      {
+        "event_type": "deck_generated",
+        "writers": [
+          "report_writer"
+        ],
+        "sections": [
+          "Deliverables"
+        ]
+      },
+      {
+        "event_type": "model_generated",
+        "writers": [
+          "report_writer"
+        ],
+        "sections": [
+          "Deliverables"
+        ]
+      },
+      {
+        "event_type": "human_input_requested",
+        "writers": [
+          "manager"
+        ],
+        "sections": [
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "human_input_provided",
+        "writers": [
+          "human"
+        ],
+        "sections": [
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "phase_transitioned",
+        "writers": [
+          "manager"
+        ],
+        "sections": [
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "engagement_completed",
+        "writers": [
+          "manager"
+        ],
+        "sections": [
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "engagement_failed",
+        "writers": [
+          "system"
+        ],
+        "sections": [
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "engagement_aborted",
+        "writers": [
+          "human"
+        ],
+        "sections": [
+          "Lifecycle Status"
+        ]
+      },
+      {
+        "event_type": "lesson_captured",
+        "writers": [
+          "knowledge_curator"
+        ],
+        "sections": [
+          "Knowledge Links"
+        ]
+      },
+      {
+        "event_type": "knowledge_graph_linked",
+        "writers": [
+          "knowledge_curator"
+        ],
+        "sections": [
+          "Knowledge Links"
+        ]
+      },
+      {
+        "event_type": "profile_updated",
+        "writers": [
+          "knowledge_curator"
+        ],
+        "sections": [
+          "Knowledge Links"
+        ]
+      }
+    ]
+  }
 }
