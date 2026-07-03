@@ -9,6 +9,19 @@ first tagged release.
 
 ### M1.7 — Concurrency, Versioning & Corrections — in progress
 #### Added
+- **M1.7.6 — ownership matrices as data** (`state/ownership.py`, internal — no
+  enforcement, no public-API change): `Role` (ADR-005 names + externals +
+  ADR-002 collective markers; seeds M6's role registry), `COMPONENT_OWNERSHIP`
+  (16 components; exactly one writer per writable resource, pairwise-disjoint,
+  every row evidenced + mapped to its future enforcement owner),
+  `SECTION_OWNERSHIP` (the ADR-002 Agent Read/Write Matrix transcribed
+  verbatim, mapped onto all 30 `EngagementState` fields — drift-tested), and
+  `EVENT_OWNERSHIP` (all 49 event types → writing roles → affected sections,
+  from the ADR-002 event catalog — drift-tested against `EventType`). The
+  traceability generator now emits the three datasets (markdown + JSON
+  `ownership` key). Completeness/fidelity tests fail on any unmapped event
+  type, unmapped state field, duplicate writer, or ADR drift. Enforcement
+  remains deliberately absent until M6 (TD-003).
 - **M1.7.5 — remaining validation rules + traceability dispositions (closes
   TD-002, TD-004):** four gate-entry precondition rules in the existing
   lifecycle registry — `LIFE-005` (planning+: classification, real question,
