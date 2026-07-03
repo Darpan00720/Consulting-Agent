@@ -34,3 +34,4 @@ ruvector.db
 
 # Graphify vault index outputs (regenerable via 'make vault-index')
 knowledge-vault/graphify-out/
+.claude-flow/tasks/
