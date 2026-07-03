@@ -1,10 +1,23 @@
-"""Lifecycle rules — phase preconditions and transition legality (ADR-002 §2)."""
+"""Lifecycle rules — phase preconditions and transition legality (ADR-002 §2).
+
+Gate-entry preconditions (LIFE-005..008, M1.7.5) use **at-or-beyond**
+semantics: a precondition of entering phase X must still hold in every later
+active phase. COMPLETED, FAILED, and ABORTED are exempt — an implementation
+inference (ADR-002 is silent on preconditions of ended engagements).
+"""
 
 from __future__ import annotations
 
 from state.enums import LifecycleStatus
 from state.models import EngagementState
-from state.sections.enums import DeliverableKind, RecommendationStatus
+from state.sections.enums import (
+    DeliverableKind,
+    GapCriticality,
+    GapStatus,
+    IssueNodeStatus,
+    RecommendationStatus,
+    ReviewVerdict,
+)
 from state.validation._util import has_pass_gate
 from state.validation.types import (
     Finding,
@@ -48,6 +61,99 @@ def _build_allowed() -> dict[LifecycleStatus, set[LifecycleStatus]]:
 
 
 _ALLOWED = _build_allowed()
+
+# Ended engagements are exempt from gate-entry preconditions (inference).
+_ENDED = {LifecycleStatus.COMPLETED, *_TERMINAL}
+
+
+def _at_or_beyond(state: EngagementState, phase: LifecycleStatus) -> bool:
+    """Whether the current status is an active phase at/beyond ``phase``."""
+    if state.status in _ENDED:
+        return False
+    return _FORWARD.index(state.status) >= _FORWARD.index(phase)
+
+
+def _planning_preconditions(state: EngagementState) -> list[Finding]:
+    if not _at_or_beyond(state, LifecycleStatus.PLANNING):
+        return []
+    findings: list[Finding] = []
+    if state.classification is None:
+        findings.append(
+            Finding(
+                path="classification",
+                message="planning requires a case classification",
+            )
+        )
+    if state.problem is None or not state.problem.real_question:
+        findings.append(
+            Finding(
+                path="problem.real_question",
+                message="planning requires the restated real question",
+            )
+        )
+    for index, gap in enumerate(state.information_gaps):
+        if gap.criticality is GapCriticality.LOAD_BEARING and gap.status not in (
+            GapStatus.ANSWERED,
+            GapStatus.ASSUMED,
+        ):
+            findings.append(
+                Finding(
+                    path=f"information_gaps[{index}].status",
+                    message=f"load-bearing gap {gap.id!r} is neither answered "
+                    "nor assumed",
+                    object_id=gap.id,
+                )
+            )
+    return findings
+
+
+def _analysis_preconditions(state: EngagementState) -> list[Finding]:
+    if not _at_or_beyond(state, LifecycleStatus.ANALYSIS):
+        return []
+    findings: list[Finding] = []
+    if not state.issue_tree:
+        findings.append(
+            Finding(
+                path="issue_tree",
+                message="analysis requires a non-empty issue tree",
+            )
+        )
+    if state.plan is None:
+        findings.append(
+            Finding(path="plan", message="analysis requires an engagement plan")
+        )
+    return findings
+
+
+def _review_preconditions(state: EngagementState) -> list[Finding]:
+    if not _at_or_beyond(state, LifecycleStatus.REVIEW):
+        return []
+    parents = {node.parent for node in state.issue_tree if node.parent}
+    findings: list[Finding] = []
+    for index, node in enumerate(state.issue_tree):
+        if node.id not in parents and node.status is not IssueNodeStatus.ANSWERED:
+            findings.append(
+                Finding(
+                    path=f"issue_tree[{index}].status",
+                    message=f"issue-tree leaf {node.id!r} is not answered",
+                    object_id=node.id,
+                )
+            )
+    return findings
+
+
+def _challenge_preconditions(state: EngagementState) -> list[Finding]:
+    if not _at_or_beyond(state, LifecycleStatus.CHALLENGE):
+        return []
+    notes = state.reviewer_notes
+    if notes is None or notes.verdict is not ReviewVerdict.APPROVED:
+        return [
+            Finding(
+                path="reviewer_notes.verdict",
+                message="challenge requires the reviewer verdict 'approved'",
+            )
+        ]
+    return []
 
 
 def _reporting_requires_gates(state: EngagementState) -> list[Finding]:
@@ -147,5 +253,38 @@ RULES = [
         "ADR-002 §2",
         "Current status matches the last recorded phase.",
         _status_matches_history,
+    ),
+    ValidationRule(
+        "LIFE-005",
+        ValidationGroup.LIFECYCLE,
+        ViolationSeverity.ERROR,
+        "ADR-002 §Validation Rules / Enter Planning",
+        "planning+ requires classification, real question, and load-bearing "
+        "gaps answered or assumed.",
+        _planning_preconditions,
+    ),
+    ValidationRule(
+        "LIFE-006",
+        ValidationGroup.LIFECYCLE,
+        ViolationSeverity.ERROR,
+        "ADR-002 §Validation Rules / Enter Specialist Analysis",
+        "analysis+ requires a non-empty issue tree and an engagement plan.",
+        _analysis_preconditions,
+    ),
+    ValidationRule(
+        "LIFE-007",
+        ValidationGroup.LIFECYCLE,
+        ViolationSeverity.ERROR,
+        "ADR-002 §Validation Rules / Enter Reviewer",
+        "review+ requires every issue-tree leaf to be answered.",
+        _review_preconditions,
+    ),
+    ValidationRule(
+        "LIFE-008",
+        ValidationGroup.LIFECYCLE,
+        ViolationSeverity.ERROR,
+        "ADR-002 §Validation Rules / Enter Challenger",
+        "challenge+ requires the reviewer verdict 'approved'.",
+        _challenge_preconditions,
     ),
 ]

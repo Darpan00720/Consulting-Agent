@@ -81,6 +81,27 @@ def test_life_004_status_does_not_match_history() -> None:
     )
 
 
+def test_life_005_planning_preconditions_missing() -> None:
+    ids = _ids(_state(status=LifecycleStatus.PLANNING))
+    assert "LIFE-005" in ids
+
+
+def test_life_006_analysis_preconditions_missing() -> None:
+    ids = _ids(_state(status=LifecycleStatus.ANALYSIS))
+    assert "LIFE-006" in ids
+
+
+def test_life_007_unanswered_leaf_blocks_review() -> None:
+    node = IssueNode(question="q", owner="o")  # status defaults to OPEN
+    ids = _ids(_state(status=LifecycleStatus.REVIEW, issue_tree=[node]))
+    assert "LIFE-007" in ids
+
+
+def test_life_008_challenge_requires_reviewer_approval() -> None:
+    ids = _ids(_state(status=LifecycleStatus.CHALLENGE))
+    assert "LIFE-008" in ids
+
+
 # --- referential ------------------------------------------------------------
 
 
