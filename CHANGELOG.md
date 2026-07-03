@@ -26,6 +26,17 @@ first tagged release.
   stays reserved for the public append API. 18 dedicated invariant tests
   (A1–A8, V1–V7, C1–C3). These modules are arithmetic only; correctness is
   established by S3 admission, the S4 pipeline, and M1.7.4 replay integrity.
+- **M1.7.3-S3 — concurrency guard** (pure, stateless decision layer):
+  `guard.check_append(candidates, *, engagement_id, committed_version,
+  committed_event_ids, expected_version) -> GuardDecision` — admission checks
+  (empty batch; engagement match incl. mixed batches; `seq == 0` sentinel;
+  committed-id idempotency; intra-batch id uniqueness) then the O(1) optimistic
+  version compare (stale and ahead writers both rejected). Rejections carry a
+  fully constructed error (stable `error_code` included); **decision precedence
+  is contractual: admission → version → success**. Typed identifiers throughout
+  (`AbstractSet[EventId]`). `ValueError` only for internal misuse (negative
+  committed version). 16 dedicated invariant tests (G1–G16). The guard decides
+  and never acts — orchestration is S4.
 #### Changed
 - **M1.7.2 (design D4) — fold-derived `state_version`; `PROJECTION_VERSION` 1 → 2:**
   `apply()` now unconditionally derives `metadata.state_version` from
