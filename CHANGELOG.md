@@ -9,6 +9,21 @@ first tagged release.
 
 ### M1.7 — Concurrency, Versioning & Corrections — in progress
 #### Added
+- **M1.7.5 — remaining validation rules + traceability dispositions (closes
+  TD-002, TD-004):** four gate-entry precondition rules in the existing
+  lifecycle registry — `LIFE-005` (planning+: classification, real question,
+  load-bearing gaps answered/assumed), `LIFE-006` (analysis+: non-empty issue
+  tree + plan), `LIFE-007` (review+: every leaf answered), `LIFE-008`
+  (challenge+: reviewer verdict approved) — with **at-or-beyond** semantics and
+  COMPLETED/FAILED/ABORTED exempt (an implementation inference; ADR-002 is
+  silent on ended engagements). The append pipeline now enforces these at write
+  time automatically (it validates every candidate post-state). Traceability
+  gains a **disposition section** (markdown + JSON): all 25 ADR-002
+  §Validation-Rules items mapped exactly once across registry / record-level /
+  boundary-write / boundary-at-rest / by-construction / deferred, guarded by
+  completeness tests. "No mutation after completed" is recorded as an
+  append-boundary admission policy owned by **M1.8** — deliberately not
+  snapshot validation. Rule registry: 17 → 21 rules.
 - **M1.7.4 — replay integrity** (`state/append/integrity.py`, internal — no
   public API change): `verify_log` / `verify_pair`, the at-rest counterpart of
   the write-time guard — pure, single-pass, first-failure-with-index. Enforces
