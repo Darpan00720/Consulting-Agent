@@ -35,4 +35,36 @@ def test_every_rule_has_a_test() -> None:
 
 def test_traceability_json_is_fresh() -> None:
     committed = json.loads(_JSON.read_text(encoding="utf-8"))
-    assert {row["rule_id"] for row in committed} == {r.rule_id for r in ALL_RULES}
+    assert {row["rule_id"] for row in committed["rules"]} == {
+        r.rule_id for r in ALL_RULES
+    }
+
+
+def test_dispositions_cover_all_adr_items_exactly_once() -> None:
+    committed = json.loads(_JSON.read_text(encoding="utf-8"))
+    dispositions = committed["dispositions"]
+    # ADR-002 §Validation Rules: 6 preconditions + 5 forbidden transitions
+    # + 7 state invariants + 4 concurrency rules + 3 approval rules
+    assert len(dispositions) == 25
+    items = [d["adr_item"] for d in dispositions]
+    assert len(items) == len(set(items)), "an ADR item is mapped twice"
+    allowed = {
+        "registry",
+        "record-level",
+        "boundary-write",
+        "boundary-at-rest",
+        "by-construction",
+        "deferred",
+    }
+    assert {d["disposition"] for d in dispositions} <= allowed
+
+
+def test_registry_dispositions_reference_live_rules() -> None:
+    committed = json.loads(_JSON.read_text(encoding="utf-8"))
+    live_ids = {r.rule_id for r in ALL_RULES}
+    for entry in committed["dispositions"]:
+        if entry["disposition"] != "registry":
+            continue
+        referenced = set(re.findall(r"\b[A-Z]+-\d{3}\b", entry["mechanism"]))
+        assert referenced, f"registry row without a rule id: {entry['adr_item']}"
+        assert referenced <= live_ids, f"stale rule ids in: {entry['mechanism']}"

@@ -13,6 +13,10 @@ One row per validation rule: **Rule → Validator → Test(s)**. Rule ids are a
 | LIFE-002 | lifecycle | error | ADR-002 §Validation Rules | A completed engagement has a report and an accepted recommendation. | `lifecycle._completed_requires_outputs` | test_life_002_completed_without_outputs |
 | LIFE-003 | lifecycle | error | ADR-002 §Validation Rules | Recorded phase transitions are legal. | `lifecycle._transitions_are_legal` | test_life_003_illegal_transition |
 | LIFE-004 | lifecycle | warning | ADR-002 §2 | Current status matches the last recorded phase. | `lifecycle._status_matches_history` | test_life_004_status_does_not_match_history |
+| LIFE-005 | lifecycle | error | ADR-002 §Validation Rules / Enter Planning | planning+ requires classification, real question, and load-bearing gaps answered or assumed. | `lifecycle._planning_preconditions` | test_life_005_fires_at_or_beyond_planning<br>test_life_005_006_satisfied_states_pass<br>test_life_005_planning_preconditions_missing |
+| LIFE-006 | lifecycle | error | ADR-002 §Validation Rules / Enter Specialist Analysis | analysis+ requires a non-empty issue tree and an engagement plan. | `lifecycle._analysis_preconditions` | test_life_006_analysis_preconditions_missing |
+| LIFE-007 | lifecycle | error | ADR-002 §Validation Rules / Enter Reviewer | review+ requires every issue-tree leaf to be answered. | `lifecycle._review_preconditions` | test_life_007_non_leaf_and_answered_leaf_ok<br>test_life_007_unanswered_leaf_blocks_review |
+| LIFE-008 | lifecycle | error | ADR-002 §Validation Rules / Enter Challenger | challenge+ requires the reviewer verdict 'approved'. | `lifecycle._challenge_preconditions` | test_life_008_ok_when_reviewer_approved<br>test_life_008_challenge_requires_reviewer_approval |
 | REF-001 | referential | error | ADR-002 §Validation Rules | Gap assumption_ref resolves to an existing assumption. | `referential._gap_assumption_refs_resolve` | test_ref_001_unknown_gap_assumption_ref |
 | REF-002 | referential | error | ADR-002 §Validation Rules | Finding evidence_refs / assumption_refs resolve to existing objects. | `referential._finding_refs_resolve` | test_ref_002_unknown_finding_assumption_ref<br>test_ref_002_unknown_finding_evidence_ref |
 | REF-003 | referential | error | ADR-002 §12 | Issue-tree node parent resolves to an existing node. | `referential._issue_node_parents_resolve` | test_ref_003_unknown_node_parent |
@@ -23,3 +27,33 @@ One row per validation rule: **Rule → Validator → Test(s)**. Rule ids are a
 | GOV-001 | governance | error | ADR-002 §Validation Rules / Approval | Recommendation acceptance requires reviewer + challenger gates passed. | `governance._acceptance_requires_gates` | test_gov_001_ok_when_gates_passed<br>test_gov_001_acceptance_without_gates |
 | GOV-002 | governance | error | ADR-002 §Validation Rules / Approval | A 'needs_rework' verdict carries an actionable fix (issues / counter_case). | `governance._rejections_have_actionable_fix` | test_gov_002_challenge_rework_without_counter_case<br>test_gov_002_rework_without_actionable_fix |
 | GOV-003 | governance | warning | ADR-002 §Validation Rules | A failed gate has a corresponding 'needs_rework' verdict recorded. | `governance._fail_gates_have_rework` | test_gov_003_ok_for_passing_gate<br>test_gov_003_challenger_fail_without_rework<br>test_gov_003_failed_gate_without_rework |
+
+## ADR-002 disposition (every §Validation-Rules item, exactly once — TD-004)
+
+| ADR-002 item | Disposition | Mechanism |
+|---|---|---|
+| Enter Planning: archetype + real_question; load-bearing gaps answered/assumed | registry | LIFE-005 |
+| Enter Specialist Analysis: non-empty issue_tree + engagement_plan | registry | LIFE-006 (leaf-owner half: STRUCT-001) |
+| Enter Reviewer: every leaf answered; findings carry evidence | registry | LIFE-007 (finding-evidence half: STRUCT-002) |
+| Enter Challenger: review verdict approved | registry | LIFE-008 |
+| Generate Report: reviewer approved AND challenger stands | registry | LIFE-001 |
+| Complete: report deliverable + recommendation accepted | registry | LIFE-002 |
+| Reaching reporting without both gate approvals | registry | LIFE-001 |
+| Skipping review or challenge | registry | LIFE-003 (legal-transition map) |
+| Mutating any section after status=completed | deferred | append-boundary admission policy (EngagementReopened) — M1.8 |
+| Editing or deleting any event | by-construction | frozen event models; append-only committed log (M1.4/M1.7.3) |
+| A specialist writing another specialist's section | deferred | R/W matrix data M1.7.6; role enforcement M6 (TD-003) |
+| Evidence type-specific provenance (source/method/ref) | record-level | ledgers._EVIDENCE_RULES (M1.1) |
+| Every load-bearing assumption has a breakeven | record-level | ledgers.Assumption._enforce_breakeven (M1.1) |
+| Every issue-tree leaf has exactly one owner | registry | STRUCT-001 |
+| recommendation.confidence <= min validated-evidence confidence | registry | BIZ-001 |
+| No recommendation without >=1 validated evidence | registry | BIZ-002 |
+| Every assumption_ref/evidence_ref resolves | registry | REF-001, REF-002, REF-003, REF-004 |
+| state_version == max(events.seq) | boundary-at-rest | apply() stamp (M1.7.2) + verify_pair R11 (M1.7.4) |
+| Writes are event appends with monotonic seq | boundary-write | sequencing.stamp + pipeline (M1.7.3) |
+| Section ownership is exclusive | deferred | R/W matrix data M1.7.6; enforcement M6 |
+| Lifecycle transitions serialized through the Manager | deferred | Engagement Manager — M6 |
+| Optimistic concurrency: stale-version append rejected | boundary-write | guard version compare (M1.7.3, D3) |
+| Analysis gate only Reviewer; recommendation gate only Challenger; final acceptance Human | deferred | role registry — M6 (TD-003; QualityGate.by already captured) |
+| No agent may approve its own output | deferred | role registry — M6 (TD-003) |
+| A rejection must carry an actionable required_fix | registry | GOV-002 (+GOV-003) |

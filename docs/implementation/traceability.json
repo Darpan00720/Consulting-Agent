@@ -1,198 +1,375 @@
-[
-  {
-    "rule_id": "STRUCT-001",
-    "group": "structural",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules / \u00a712",
-    "description": "Every issue-tree leaf has an owner.",
-    "validator": "structural._leaf_nodes_have_owner",
-    "tests": [
-      "test_struct_001_leaf_without_owner"
-    ]
-  },
-  {
-    "rule_id": "STRUCT-002",
-    "group": "structural",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "Every specialist finding references at least one evidence item.",
-    "validator": "structural._findings_have_evidence",
-    "tests": [
-      "test_struct_002_finding_without_evidence"
-    ]
-  },
-  {
-    "rule_id": "STRUCT-003",
-    "group": "structural",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a78",
-    "description": "Answered gaps have a resolution; assumed gaps have an assumption_ref.",
-    "validator": "structural._resolved_gaps_are_complete",
-    "tests": [
-      "test_struct_003_assumed_gap_without_assumption_ref",
-      "test_struct_003_answered_gap_without_resolution"
-    ]
-  },
-  {
-    "rule_id": "LIFE-001",
-    "group": "lifecycle",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "reporting/completed requires reviewer + challenger gates passed.",
-    "validator": "lifecycle._reporting_requires_gates",
-    "tests": [
-      "test_life_001_ok_when_gates_passed",
-      "test_life_001_reporting_without_gates"
-    ]
-  },
-  {
-    "rule_id": "LIFE-002",
-    "group": "lifecycle",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "A completed engagement has a report and an accepted recommendation.",
-    "validator": "lifecycle._completed_requires_outputs",
-    "tests": [
-      "test_life_002_completed_without_outputs"
-    ]
-  },
-  {
-    "rule_id": "LIFE-003",
-    "group": "lifecycle",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "Recorded phase transitions are legal.",
-    "validator": "lifecycle._transitions_are_legal",
-    "tests": [
-      "test_life_003_illegal_transition"
-    ]
-  },
-  {
-    "rule_id": "LIFE-004",
-    "group": "lifecycle",
-    "severity": "warning",
-    "adr_reference": "ADR-002 \u00a72",
-    "description": "Current status matches the last recorded phase.",
-    "validator": "lifecycle._status_matches_history",
-    "tests": [
-      "test_life_004_status_does_not_match_history"
-    ]
-  },
-  {
-    "rule_id": "REF-001",
-    "group": "referential",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "Gap assumption_ref resolves to an existing assumption.",
-    "validator": "referential._gap_assumption_refs_resolve",
-    "tests": [
-      "test_ref_001_unknown_gap_assumption_ref"
-    ]
-  },
-  {
-    "rule_id": "REF-002",
-    "group": "referential",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "Finding evidence_refs / assumption_refs resolve to existing objects.",
-    "validator": "referential._finding_refs_resolve",
-    "tests": [
-      "test_ref_002_unknown_finding_assumption_ref",
-      "test_ref_002_unknown_finding_evidence_ref"
-    ]
-  },
-  {
-    "rule_id": "REF-003",
-    "group": "referential",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a712",
-    "description": "Issue-tree node parent resolves to an existing node.",
-    "validator": "referential._issue_node_parents_resolve",
-    "tests": [
-      "test_ref_003_unknown_node_parent"
-    ]
-  },
-  {
-    "rule_id": "REF-004",
-    "group": "referential",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a712",
-    "description": "Issue-tree node evidence_refs resolve to existing evidence.",
-    "validator": "referential._issue_node_evidence_refs_resolve",
-    "tests": [
-      "test_ref_004_unknown_node_evidence_ref"
-    ]
-  },
-  {
-    "rule_id": "BIZ-001",
-    "group": "business",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "Overall confidence does not exceed the minimum validated-evidence confidence.",
-    "validator": "business._confidence_bounded_by_evidence",
-    "tests": [
-      "test_biz_001_skipped_without_validated_evidence",
-      "test_biz_001_within_bound_is_ok",
-      "test_biz_001_confidence_exceeds_evidence"
-    ]
-  },
-  {
-    "rule_id": "BIZ-002",
-    "group": "business",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "A recommendation with a decision has at least one validated evidence item.",
-    "validator": "business._recommendation_has_validated_evidence",
-    "tests": [
-      "test_biz_002_recommendation_without_validated_evidence"
-    ]
-  },
-  {
-    "rule_id": "BIZ-003",
-    "group": "business",
-    "severity": "warning",
-    "adr_reference": "ADR-002 \u00a79",
-    "description": "A recommendation does not rest on invalidated assumptions.",
-    "validator": "business._not_resting_on_invalidated_assumptions",
-    "tests": [
-      "test_biz_003_rests_on_invalidated_assumption"
-    ]
-  },
-  {
-    "rule_id": "GOV-001",
-    "group": "governance",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules / Approval",
-    "description": "Recommendation acceptance requires reviewer + challenger gates passed.",
-    "validator": "governance._acceptance_requires_gates",
-    "tests": [
-      "test_gov_001_ok_when_gates_passed",
-      "test_gov_001_acceptance_without_gates"
-    ]
-  },
-  {
-    "rule_id": "GOV-002",
-    "group": "governance",
-    "severity": "error",
-    "adr_reference": "ADR-002 \u00a7Validation Rules / Approval",
-    "description": "A 'needs_rework' verdict carries an actionable fix (issues / counter_case).",
-    "validator": "governance._rejections_have_actionable_fix",
-    "tests": [
-      "test_gov_002_challenge_rework_without_counter_case",
-      "test_gov_002_rework_without_actionable_fix"
-    ]
-  },
-  {
-    "rule_id": "GOV-003",
-    "group": "governance",
-    "severity": "warning",
-    "adr_reference": "ADR-002 \u00a7Validation Rules",
-    "description": "A failed gate has a corresponding 'needs_rework' verdict recorded.",
-    "validator": "governance._fail_gates_have_rework",
-    "tests": [
-      "test_gov_003_ok_for_passing_gate",
-      "test_gov_003_challenger_fail_without_rework",
-      "test_gov_003_failed_gate_without_rework"
-    ]
-  }
-]
+{
+  "rules": [
+    {
+      "rule_id": "STRUCT-001",
+      "group": "structural",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / \u00a712",
+      "description": "Every issue-tree leaf has an owner.",
+      "validator": "structural._leaf_nodes_have_owner",
+      "tests": [
+        "test_struct_001_leaf_without_owner"
+      ]
+    },
+    {
+      "rule_id": "STRUCT-002",
+      "group": "structural",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "Every specialist finding references at least one evidence item.",
+      "validator": "structural._findings_have_evidence",
+      "tests": [
+        "test_struct_002_finding_without_evidence"
+      ]
+    },
+    {
+      "rule_id": "STRUCT-003",
+      "group": "structural",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a78",
+      "description": "Answered gaps have a resolution; assumed gaps have an assumption_ref.",
+      "validator": "structural._resolved_gaps_are_complete",
+      "tests": [
+        "test_struct_003_assumed_gap_without_assumption_ref",
+        "test_struct_003_answered_gap_without_resolution"
+      ]
+    },
+    {
+      "rule_id": "LIFE-001",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "reporting/completed requires reviewer + challenger gates passed.",
+      "validator": "lifecycle._reporting_requires_gates",
+      "tests": [
+        "test_life_001_ok_when_gates_passed",
+        "test_life_001_reporting_without_gates"
+      ]
+    },
+    {
+      "rule_id": "LIFE-002",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "A completed engagement has a report and an accepted recommendation.",
+      "validator": "lifecycle._completed_requires_outputs",
+      "tests": [
+        "test_life_002_completed_without_outputs"
+      ]
+    },
+    {
+      "rule_id": "LIFE-003",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "Recorded phase transitions are legal.",
+      "validator": "lifecycle._transitions_are_legal",
+      "tests": [
+        "test_life_003_illegal_transition"
+      ]
+    },
+    {
+      "rule_id": "LIFE-004",
+      "group": "lifecycle",
+      "severity": "warning",
+      "adr_reference": "ADR-002 \u00a72",
+      "description": "Current status matches the last recorded phase.",
+      "validator": "lifecycle._status_matches_history",
+      "tests": [
+        "test_life_004_status_does_not_match_history"
+      ]
+    },
+    {
+      "rule_id": "LIFE-005",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / Enter Planning",
+      "description": "planning+ requires classification, real question, and load-bearing gaps answered or assumed.",
+      "validator": "lifecycle._planning_preconditions",
+      "tests": [
+        "test_life_005_fires_at_or_beyond_planning",
+        "test_life_005_006_satisfied_states_pass",
+        "test_life_005_planning_preconditions_missing"
+      ]
+    },
+    {
+      "rule_id": "LIFE-006",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / Enter Specialist Analysis",
+      "description": "analysis+ requires a non-empty issue tree and an engagement plan.",
+      "validator": "lifecycle._analysis_preconditions",
+      "tests": [
+        "test_life_006_analysis_preconditions_missing"
+      ]
+    },
+    {
+      "rule_id": "LIFE-007",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / Enter Reviewer",
+      "description": "review+ requires every issue-tree leaf to be answered.",
+      "validator": "lifecycle._review_preconditions",
+      "tests": [
+        "test_life_007_non_leaf_and_answered_leaf_ok",
+        "test_life_007_unanswered_leaf_blocks_review"
+      ]
+    },
+    {
+      "rule_id": "LIFE-008",
+      "group": "lifecycle",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / Enter Challenger",
+      "description": "challenge+ requires the reviewer verdict 'approved'.",
+      "validator": "lifecycle._challenge_preconditions",
+      "tests": [
+        "test_life_008_ok_when_reviewer_approved",
+        "test_life_008_challenge_requires_reviewer_approval"
+      ]
+    },
+    {
+      "rule_id": "REF-001",
+      "group": "referential",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "Gap assumption_ref resolves to an existing assumption.",
+      "validator": "referential._gap_assumption_refs_resolve",
+      "tests": [
+        "test_ref_001_unknown_gap_assumption_ref"
+      ]
+    },
+    {
+      "rule_id": "REF-002",
+      "group": "referential",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "Finding evidence_refs / assumption_refs resolve to existing objects.",
+      "validator": "referential._finding_refs_resolve",
+      "tests": [
+        "test_ref_002_unknown_finding_assumption_ref",
+        "test_ref_002_unknown_finding_evidence_ref"
+      ]
+    },
+    {
+      "rule_id": "REF-003",
+      "group": "referential",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a712",
+      "description": "Issue-tree node parent resolves to an existing node.",
+      "validator": "referential._issue_node_parents_resolve",
+      "tests": [
+        "test_ref_003_unknown_node_parent"
+      ]
+    },
+    {
+      "rule_id": "REF-004",
+      "group": "referential",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a712",
+      "description": "Issue-tree node evidence_refs resolve to existing evidence.",
+      "validator": "referential._issue_node_evidence_refs_resolve",
+      "tests": [
+        "test_ref_004_unknown_node_evidence_ref"
+      ]
+    },
+    {
+      "rule_id": "BIZ-001",
+      "group": "business",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "Overall confidence does not exceed the minimum validated-evidence confidence.",
+      "validator": "business._confidence_bounded_by_evidence",
+      "tests": [
+        "test_biz_001_skipped_without_validated_evidence",
+        "test_biz_001_within_bound_is_ok",
+        "test_biz_001_confidence_exceeds_evidence"
+      ]
+    },
+    {
+      "rule_id": "BIZ-002",
+      "group": "business",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "A recommendation with a decision has at least one validated evidence item.",
+      "validator": "business._recommendation_has_validated_evidence",
+      "tests": [
+        "test_biz_002_recommendation_without_validated_evidence"
+      ]
+    },
+    {
+      "rule_id": "BIZ-003",
+      "group": "business",
+      "severity": "warning",
+      "adr_reference": "ADR-002 \u00a79",
+      "description": "A recommendation does not rest on invalidated assumptions.",
+      "validator": "business._not_resting_on_invalidated_assumptions",
+      "tests": [
+        "test_biz_003_rests_on_invalidated_assumption"
+      ]
+    },
+    {
+      "rule_id": "GOV-001",
+      "group": "governance",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / Approval",
+      "description": "Recommendation acceptance requires reviewer + challenger gates passed.",
+      "validator": "governance._acceptance_requires_gates",
+      "tests": [
+        "test_gov_001_ok_when_gates_passed",
+        "test_gov_001_acceptance_without_gates"
+      ]
+    },
+    {
+      "rule_id": "GOV-002",
+      "group": "governance",
+      "severity": "error",
+      "adr_reference": "ADR-002 \u00a7Validation Rules / Approval",
+      "description": "A 'needs_rework' verdict carries an actionable fix (issues / counter_case).",
+      "validator": "governance._rejections_have_actionable_fix",
+      "tests": [
+        "test_gov_002_challenge_rework_without_counter_case",
+        "test_gov_002_rework_without_actionable_fix"
+      ]
+    },
+    {
+      "rule_id": "GOV-003",
+      "group": "governance",
+      "severity": "warning",
+      "adr_reference": "ADR-002 \u00a7Validation Rules",
+      "description": "A failed gate has a corresponding 'needs_rework' verdict recorded.",
+      "validator": "governance._fail_gates_have_rework",
+      "tests": [
+        "test_gov_003_ok_for_passing_gate",
+        "test_gov_003_challenger_fail_without_rework",
+        "test_gov_003_failed_gate_without_rework"
+      ]
+    }
+  ],
+  "dispositions": [
+    {
+      "adr_item": "Enter Planning: archetype + real_question; load-bearing gaps answered/assumed",
+      "disposition": "registry",
+      "mechanism": "LIFE-005"
+    },
+    {
+      "adr_item": "Enter Specialist Analysis: non-empty issue_tree + engagement_plan",
+      "disposition": "registry",
+      "mechanism": "LIFE-006 (leaf-owner half: STRUCT-001)"
+    },
+    {
+      "adr_item": "Enter Reviewer: every leaf answered; findings carry evidence",
+      "disposition": "registry",
+      "mechanism": "LIFE-007 (finding-evidence half: STRUCT-002)"
+    },
+    {
+      "adr_item": "Enter Challenger: review verdict approved",
+      "disposition": "registry",
+      "mechanism": "LIFE-008"
+    },
+    {
+      "adr_item": "Generate Report: reviewer approved AND challenger stands",
+      "disposition": "registry",
+      "mechanism": "LIFE-001"
+    },
+    {
+      "adr_item": "Complete: report deliverable + recommendation accepted",
+      "disposition": "registry",
+      "mechanism": "LIFE-002"
+    },
+    {
+      "adr_item": "Reaching reporting without both gate approvals",
+      "disposition": "registry",
+      "mechanism": "LIFE-001"
+    },
+    {
+      "adr_item": "Skipping review or challenge",
+      "disposition": "registry",
+      "mechanism": "LIFE-003 (legal-transition map)"
+    },
+    {
+      "adr_item": "Mutating any section after status=completed",
+      "disposition": "deferred",
+      "mechanism": "append-boundary admission policy (EngagementReopened) \u2014 M1.8"
+    },
+    {
+      "adr_item": "Editing or deleting any event",
+      "disposition": "by-construction",
+      "mechanism": "frozen event models; append-only committed log (M1.4/M1.7.3)"
+    },
+    {
+      "adr_item": "A specialist writing another specialist's section",
+      "disposition": "deferred",
+      "mechanism": "R/W matrix data M1.7.6; role enforcement M6 (TD-003)"
+    },
+    {
+      "adr_item": "Evidence type-specific provenance (source/method/ref)",
+      "disposition": "record-level",
+      "mechanism": "ledgers._EVIDENCE_RULES (M1.1)"
+    },
+    {
+      "adr_item": "Every load-bearing assumption has a breakeven",
+      "disposition": "record-level",
+      "mechanism": "ledgers.Assumption._enforce_breakeven (M1.1)"
+    },
+    {
+      "adr_item": "Every issue-tree leaf has exactly one owner",
+      "disposition": "registry",
+      "mechanism": "STRUCT-001"
+    },
+    {
+      "adr_item": "recommendation.confidence <= min validated-evidence confidence",
+      "disposition": "registry",
+      "mechanism": "BIZ-001"
+    },
+    {
+      "adr_item": "No recommendation without >=1 validated evidence",
+      "disposition": "registry",
+      "mechanism": "BIZ-002"
+    },
+    {
+      "adr_item": "Every assumption_ref/evidence_ref resolves",
+      "disposition": "registry",
+      "mechanism": "REF-001, REF-002, REF-003, REF-004"
+    },
+    {
+      "adr_item": "state_version == max(events.seq)",
+      "disposition": "boundary-at-rest",
+      "mechanism": "apply() stamp (M1.7.2) + verify_pair R11 (M1.7.4)"
+    },
+    {
+      "adr_item": "Writes are event appends with monotonic seq",
+      "disposition": "boundary-write",
+      "mechanism": "sequencing.stamp + pipeline (M1.7.3)"
+    },
+    {
+      "adr_item": "Section ownership is exclusive",
+      "disposition": "deferred",
+      "mechanism": "R/W matrix data M1.7.6; enforcement M6"
+    },
+    {
+      "adr_item": "Lifecycle transitions serialized through the Manager",
+      "disposition": "deferred",
+      "mechanism": "Engagement Manager \u2014 M6"
+    },
+    {
+      "adr_item": "Optimistic concurrency: stale-version append rejected",
+      "disposition": "boundary-write",
+      "mechanism": "guard version compare (M1.7.3, D3)"
+    },
+    {
+      "adr_item": "Analysis gate only Reviewer; recommendation gate only Challenger; final acceptance Human",
+      "disposition": "deferred",
+      "mechanism": "role registry \u2014 M6 (TD-003; QualityGate.by already captured)"
+    },
+    {
+      "adr_item": "No agent may approve its own output",
+      "disposition": "deferred",
+      "mechanism": "role registry \u2014 M6 (TD-003)"
+    },
+    {
+      "adr_item": "A rejection must carry an actionable required_fix",
+      "disposition": "registry",
+      "mechanism": "GOV-002 (+GOV-003)"
+    }
+  ]
+}
