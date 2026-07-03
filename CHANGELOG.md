@@ -26,6 +26,17 @@ first tagged release.
   stays reserved for the public append API. 18 dedicated invariant tests
   (A1–A8, V1–V7, C1–C3). These modules are arithmetic only; correctness is
   established by S3 admission, the S4 pipeline, and M1.7.4 replay integrity.
+- **M1.7.3-S6 — append API completion & freeze** (no new behavior; M1.7.3 done):
+  full event-API documentation in `docs/api/EngagementState.md` (all ten facade
+  operations, append contracts, optimistic concurrency, the three version
+  numbers, the temporary read-only table, lifecycle diagram) and the sequence
+  contract in `docs/api/Events.md` (seq-0 sentinel, allocator authority,
+  ordering source of truth, idempotency). Edge-case tests S6-1…S6-8 (already-
+  covered cases reference F4/F5) and a **final public-API freeze test** pinning
+  the ten Engagement methods, `state.__all__`, `AppendResult` fields, the
+  `AppendError` hierarchy, the `AppendErrorCode` namespace, and the
+  `ValidationReport` surface — any future surface change requires a conscious
+  test edit.
 - **M1.7.3-S5 — facade event API** (wiring layer only): `Engagement` gains
   `append_event`, `append_events`, `current_version` (reads the stored
   S2-computed committed version), and `current_sequence` (delegates to S2);
