@@ -9,6 +9,23 @@ first tagged release.
 
 ### M1.7 — Concurrency, Versioning & Corrections — in progress
 #### Added
+- **M1.7.4 — replay integrity** (`state/append/integrity.py`, internal — no
+  public API change): `verify_log` / `verify_pair`, the at-rest counterpart of
+  the write-time guard — pure, single-pass, first-failure-with-index. Enforces
+  R1–R18: 1-based contiguous ordered seqs, no unassigned events, event-id
+  uniqueness, **required genesis** (`EngagementCreated` first, exactly once — no
+  recovery), **aggregate completeness** (every event anchored to the genesis
+  `engagement_id`; empty ids rejected), and paired-snapshot checks
+  (`state_version == last seq` — also how truncation surfaces, since a truncated
+  log is provably undetectable alone; engagement identity;
+  `projection_version` compatibility). `ReplayErrorCode`: 13 stable codes in an
+  additive-frozen namespace; hierarchy `SequenceIntegrityError` /
+  `LogIdentityError` / `SnapshotMismatchError` under
+  `ReplayIntegrityError(StratAgentError)` — deliberately **not** `AppendError`.
+  **Fatal** (replay must not begin) vs **recoverable** (operator action):
+  only `projection_stale` is recoverable — discard snapshot, re-project the
+  verified log. Schema evolution/upcasting deferred to M1.8 (TD-007).
+  Consumers arrive in M1.8 (load) and M1.9 (replay).
 - **M1.7.3-S1 — append contract primitives** (`state/append/`, internal until S5):
   error hierarchy `AppendError` → `VersionConflictError` (expected/actual) and
   `EventAdmissionError` (reason/event_id), each carrying a stable machine-readable
