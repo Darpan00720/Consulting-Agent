@@ -3,7 +3,8 @@
 Built slice by slice per docs/implementation/M1.7.3-Decomposition.md:
 S1 contracts (errors, result); S2 arithmetic (sequence stamping, version
 derivation); S3 decisions (concurrency guard); S4 orchestration (commit point
-+ pipeline). Internal package until the facade exposes the event API (S5).
++ pipeline); M1.7.4 adds replay integrity (the at-rest gate). Only the S5
+facade surface is public; everything else is internal.
 """
 
 from state.append.commit import (
@@ -20,6 +21,15 @@ from state.append.errors import (
     VersionConflictError,
 )
 from state.append.guard import GuardDecision, check_append
+from state.append.integrity import (
+    LogIdentityError,
+    ReplayErrorCode,
+    ReplayIntegrityError,
+    SequenceIntegrityError,
+    SnapshotMismatchError,
+    verify_log,
+    verify_pair,
+)
 from state.append.pipeline import AppendPipeline
 from state.append.result import AppendResult
 from state.append.sequencing import stamp
@@ -39,6 +49,11 @@ __all__ = [
     "Committed",
     "EventAdmissionError",
     "GuardDecision",
+    "LogIdentityError",
+    "ReplayErrorCode",
+    "ReplayIntegrityError",
+    "SequenceIntegrityError",
+    "SnapshotMismatchError",
     "StateUpdater",
     "VersionConflictError",
     "check_append",
@@ -47,4 +62,6 @@ __all__ = [
     "make_committed",
     "next_state_version",
     "stamp",
+    "verify_log",
+    "verify_pair",
 ]
