@@ -26,6 +26,22 @@ first tagged release.
   stays reserved for the public append API. 18 dedicated invariant tests
   (A1–A8, V1–V7, C1–C3). These modules are arithmetic only; correctness is
   established by S3 admission, the S4 pipeline, and M1.7.4 replay integrity.
+- **M1.7.3-S4 — atomic append pipeline + commit point** (orchestration only):
+  `AppendPipeline.append_event / append_events` run the **fixed contractual
+  phase order — Decision → Allocation → Projection → Validation → Commit** —
+  composing S3's guard, S2's arithmetic, M1.7.2's `apply`, and M1.6's runner
+  with zero logic of its own (P17: no arithmetic; P19: no business rules).
+  `Committed` (log, state, event_ids, stored S2-computed `version`) is the
+  exactly-one immutable committed-state object; **`make_committed()` is its
+  only construction path** (pure/referentially transparent — P22/P23; replay,
+  persistence, restore, and recovery are future consumers). `CandidateCommit`
+  (log, state, event_ids, validation_report, **events** = the stamped batch)
+  is the complete commit payload M1.8 will persist. Commit gate = severity
+  semantics (ERROR/FATAL counts; INFO/WARNING never block, surfaced in
+  `AppendResult.warnings`). Failed appends leave the snapshot byte-identical
+  and consume no sequence numbers; commits happen exactly once
+  (`StateUpdater` = `make_committed` + one reference swap). 23 dedicated
+  invariant tests (P1–P23) incl. a reusable `SpyStateUpdater` for M1.8.
 - **M1.7.3-S3 — concurrency guard** (pure, stateless decision layer):
   `guard.check_append(candidates, *, engagement_id, committed_version,
   committed_event_ids, expected_version) -> GuardDecision` — admission checks
