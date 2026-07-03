@@ -190,27 +190,113 @@ Rule: `load_bearing` → `breakeven` required.
 | `GateResult` | pass · fail · loop |
 | `PendingKind` | human_input · information · blocker · other |
 
-## Facade (entry point — M1.3)
+## Facade (entry point — M1.3, event API M1.7.3)
 `Engagement` is the sole public entry point for Engagement State operations, and it
 implements `EngagementProtocol` so alternative implementations (file-backed,
 AgentDB-backed, testing) can be substituted without changing consumers. The public
-API is **frozen** to exactly six operations:
+API is **frozen** to exactly ten operations (the four M1.7.3 additions are the
+event API that M1.3 explicitly reserved):
 
 | Operation | Kind | Signature | Purpose |
 |---|---|---|---|
-| `create` | classmethod | `(engagement_id, tenant_id, slug, created_by="human") -> Engagement` | New engagement as a valid bare state |
-| `from_state` | classmethod | `(state: EngagementState) -> Engagement` | Adopt an existing state (**deep-copied on ingest** — the caller's instance is never aliased) |
-| `from_json` | classmethod | `(data: str) -> Engagement` | Deserialize from JSON |
+| `create` | classmethod | `(engagement_id, tenant_id, slug, created_by="human") -> Engagement` | New engagement as a valid bare, **append-capable** state |
+| `from_state` | classmethod | `(state: EngagementState) -> Engagement` | Adopt an existing state (**deep-copied on ingest**; **read-only** — see Append availability) |
+| `from_json` | classmethod | `(data: str) -> Engagement` | Deserialize from JSON (**read-only** — see Append availability) |
 | `get_state` | method | `() -> EngagementState` | Read the current state as a **detached deep snapshot**: mutating it (models, lists, dicts — anywhere in the object graph) never affects the engagement; successive calls return equal but distinct objects |
-| `validate` | method | `() -> None` | Re-validate; raises on violation |
-| `to_json` | method | `() -> str` | Serialize to JSON |
-
-Mutation is performed **only** through the event API (a later sub-milestone), never
-by editing state directly; the facade exposes no mutation methods.
+| `validate` | method | `() -> ValidationReport` | Run M1.6 invariant validation on the current state; the report is returned **exactly as the runner produced it** (no filtering, no gating). Never raises for violations — read the report |
+| `to_json` | method | `() -> str` | Serialize the current state to JSON (the event log is not serialized — persisting logs is M1.8) |
+| `append_event` | method | `(event: Event, *, expected_version: int) -> AppendResult` | Append one event (identical contract to a one-element batch) |
+| `append_events` | method | `(events: Sequence[Event], *, expected_version: int) -> AppendResult` | Atomic batch append: one admission/concurrency check, contiguous sequence numbers, **one** validation of the final state, all-or-nothing commit |
+| `current_version` | method | `() -> int` | The committed version: the `seq` of the last committed event (`0` = none). O(1), never raises |
+| `current_sequence` | method | `() -> int` | The next sequence number to be allocated: always `current_version() + 1`. O(1), never raises |
 
 > get_state() returns a detached deep snapshot. The operation prioritizes
 > correctness and isolation over raw performance. Performance characteristics
 > are benchmarked in M1.7.7.
+
+### Appending events (`append_event` / `append_events`)
+State evolves **only** through the append API — never by editing state directly.
+Every append runs the fixed pipeline **Decision → Allocation → Projection →
+Validation → Commit** and is **deterministic**: the same committed history plus
+the same appended events always produce the same state (including
+`metadata.state_version`).
+
+- **Parameters:** candidate events must carry this engagement's `engagement_id`,
+  an unassigned sequence (`metadata.seq == 0` — the allocator assigns), and a
+  fresh `event_id` (idempotency: an already-committed id is rejected).
+  `expected_version` (required, keyword-only) is the version the caller's
+  decision was based on — see Optimistic concurrency.
+- **Returns:** `AppendResult` (frozen, JSON-serializable both ways) —
+  `success: bool` · `version: int` (committed version after the append) ·
+  `projection_version: int` (the projection semantics the events were folded
+  under — see Version semantics) · `first_seq: int` · `last_seq: int` ·
+  `appended: int` · `warnings: list[Violation]` (INFO/WARNING findings; never
+  blocking).
+- **Exceptions** (each carries a stable machine-readable
+  `error_code: AppendErrorCode` — messages are human-readable, never a
+  contract): `VersionConflictError` (`version_conflict`; exposes
+  `expected`/`actual`) · `EventAdmissionError` (`event_admission`; exposes
+  `reason`/`event_id`) · `AppendUnsupportedError` (`append_unsupported`; see
+  Append availability) · `StateValidationError` (the candidate post-state has
+  ERROR/FATAL violations; carries the full `ValidationReport`).
+- **Failure semantics:** on any failure the engagement is byte-identical to
+  before the attempt, no sequence number is consumed, and the same or a
+  corrected append can be retried. Partial commits cannot exist.
+- **The caller's event instances are never mutated** — stamped copies enter
+  the log.
+
+### Optimistic concurrency
+`expected_version` must equal `current_version()` at append time. Any mismatch
+— stale (`<`) or never-existed (`>`) — raises `VersionConflictError` with both
+numbers; nothing is merged, nothing retried automatically. Recovery is always:
+re-read (`get_state()` + `current_version()`), re-derive the events from fresh
+state, append again. Retry *policy* belongs to the orchestrating layer.
+
+### Append availability (temporary — until M1.8/M1.9)
+
+```mermaid
+flowchart TD
+    C["create()"] --> AE["append_event()"]
+    AE --> AES["append_events()"]
+    AES --> V["validate()"]
+    V --> R["future: replay (M1.9)"]
+    FS["from_state()"] -.-> RO["read-only:
+    get_state / validate / to_json /
+    current_version / current_sequence"]
+    FJ["from_json()"] -.-> RO
+    RO -.appends raise
+    AppendUnsupportedError.-> X(("no append
+    until M1.8/M1.9"))
+```
+
+| Constructor | Append |
+|---|---|
+| `create()` | ✅ supported |
+| replay (M1.9) | ✅ supported (future) |
+| `from_state()` | ❌ read-only — appends raise `AppendUnsupportedError` |
+| `from_json()` | ❌ read-only — appends raise `AppendUnsupportedError` |
+
+`to_json()` serializes the state but not the event log, so an adopted state
+arrives without its history. Rather than fabricate sequence numbers or reset
+versions, adopted engagements are **read-only**: appends raise
+`AppendUnsupportedError` (stable code `append_unsupported`) before any pipeline
+phase executes. **This restriction is temporary.** M1.8 introduces persisted
+event logs; M1.9 replay-backed engagements remove this limitation.
+
+### Version semantics (three numbers, three meanings)
+- **`current_version()` / `AppendResult.version`** — the committed version:
+  the `seq` of the last committed event. The optimistic-concurrency token.
+- **`metadata.state_version`** — projection-derived (M1.7.2): the `seq` of the
+  last event *applied to the state*. For pipeline-native engagements it always
+  equals `current_version()`. Callers can never assign it — the stamp is
+  unconditional.
+- **`AppendResult.projection_version` / `EngagementState.projection_version`**
+  — which projection semantics were used. The result field reports the
+  projection version the appended events were folded under (currently 2). The
+  state's own field records *full-projection provenance*: `0` for states built
+  directly (e.g. `create()`), `2` for states produced by `project()` — replay
+  (M1.9) reconciles the two. See
+  `docs/architecture/projection-versioning.md`.
 
 ## Stability guarantees
 **Lifecycle: Stable** — the Engagement State public API entered the **Stable**

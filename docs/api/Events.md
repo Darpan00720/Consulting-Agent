@@ -67,7 +67,7 @@ exactly one category (enforced by a completeness test).
 |---|---|---|
 | `event_id` | `EventId` | immutable, auto |
 | `engagement_id` | `EngagementId` | owning engagement |
-| `seq` | `int` | total-order position; **allocated in M1.7** (field only here) |
+| `seq` | `int` | total-order position; `0` = **unassigned sentinel** — see the sequence contract below |
 | `occurred_at` | `datetime` | **business time** — when the fact happened |
 | `recorded_at` | `datetime` | **system time** — when it entered the log (default: now) |
 | `actor` | `str` | **who** performed the action (human / system / agent-name; enum in M3) |
@@ -75,6 +75,27 @@ exactly one category (enforced by a completeness test).
 | `schema_version` | `int` | per-event schema generation |
 | `causation_id` | `EventId \| None` | the event that caused this |
 | `correlation_id` | `str \| None` | groups events of one phase |
+
+## The sequence contract (M1.7.3, design D2)
+- **`seq == 0` means unassigned.** Events are constructed unassigned; only the
+  append pipeline's allocator ever assigns `seq`. Submitting a pre-assigned
+  event to the append API is rejected (`EventAdmissionError`).
+- **Assignment:** at append time, after admission/concurrency checks pass. The
+  stored event of record is a **stamped frozen copy** — the caller's instance
+  is never mutated.
+- **Ordering:** `seq` starts at 1 and is strictly monotonic and contiguous per
+  engagement — no gaps (failed appends consume nothing), no duplicates (single
+  allocator + atomic commit). **The committed log's `seq` is the single source
+  of truth for ordering** — not `occurred_at` (business time may legitimately
+  be out of order), not `recorded_at`, not list position.
+- **Idempotency:** an `event_id` can be committed at most once per engagement;
+  a duplicate submission is rejected at admission.
+- **Version identity:** the `seq` an event receives is exactly the
+  `state_version` the state carries after that event is applied
+  (`current_sequence() == current_version() + 1`, always).
+- Projection (`project()`/`apply`) remains seq-blind — it folds in the order
+  given; ordering is enforced at the boundary that feeds it (the pipeline
+  today, replay integrity in M1.7.4/M1.9).
 
 ## Event model shape
 Each event = `type` (a `Literal` discriminator) + `metadata: EventMetadata` +
