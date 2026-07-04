@@ -10,10 +10,10 @@ Approved private seam (P-DD-A): to read an engagement's committed log for
 ``engagement._pipeline.committed()``. It introduces no new facade accessor and
 does not change the frozen 10-method public API.
 
-Public surface: only the persistence error taxonomy is exposed today (the S1
-skeleton). ``EngagementStore`` and ``save``/``load`` arrive in later slices;
-the implementation modules (``paths``, and the future ``format``/``atomic``/
-``store``) remain internal.
+Public surface: only the persistence error taxonomy is exposed today. The
+implementation modules — ``paths`` (S1), ``format`` (S2: the pure codec +
+``Manifest``), and the future ``atomic``/``store`` — remain **internal**;
+``EngagementStore`` and ``save``/``load`` arrive in later slices.
 """
 
 from persistence.errors import (

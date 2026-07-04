@@ -9,6 +9,15 @@ first tagged release.
 
 ### M1.8 — Persistence (append / save / load) — in progress
 #### Added
+- **M1.8-S2 — persistence codec** (`persistence/format.py`, internal; pure): the
+  on-disk format — `dump_log`/`load_log` (NDJSON, one `Event` per line, seq
+  order), `dump_snapshot`/`load_snapshot` (`EngagementState` JSON), and a minimal
+  frozen `Manifest` (`format_version`, `log_sha256`, `snapshot_sha256` — no
+  timestamps/UUIDs/paths; deterministic, preserving PER-011) with
+  `dump_manifest`/`load_manifest`. **Pure** (PER-013): no filesystem IO, no
+  hashing (the store supplies checksums), no globals/mutation/caching.
+  **Canonical** (PER-014): equivalent objects serialize identically. Malformed /
+  schema-invalid input raises `CorruptArtifactError` (codec owns malformed JSON).
 - **M1.8-S1 — persistence package skeleton** (`packages/persistence/`, sibling to
   `state`; DD-1 keeps `state` IO-free): the persistence **error taxonomy**
   (`PersistenceError(StratAgentError)` + `MissingArtifactError` / `TornWriteError`
