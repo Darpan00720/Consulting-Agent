@@ -7,8 +7,17 @@ first tagged release.
 
 ## [Unreleased]
 
-### M1.7 — Concurrency, Versioning & Corrections — in progress
+### M1.7 — Concurrency, Versioning & Corrections — complete (2026-07-04)
+Writable Engagement State: snapshot semantics, the append pipeline + facade
+event API, replay integrity, gate-entry validation rules, ownership as data,
+and performance baselines. Sub-milestones M1.7.1–M1.7.8; see
+`docs/reviews/M1.7-Completion-Report.md`.
 #### Added
+- **M1.7.8 — M1.7 closure** (docs/tooling/hygiene only; no runtime change):
+  tooling aligned on Python 3.12 (TD-008; `_replace` adopts a PEP 695 generic,
+  UP040 type-aliases deferred as TD-012); M1-Decomposition §M1.7 corrected to
+  the as-built structure (TD-009); BACKLOG reconciled as the authoritative TD
+  register (TD-003→M6, TD-007→M1.8 recorded); M1.7 Completion Report added.
 - **M1.7.7 — performance baselines** (measurement + docs only; no behaviour
   change): benchmarks for the append write path (`append_event`,
   `append_events`), the `get_state` snapshot, and replay verification
