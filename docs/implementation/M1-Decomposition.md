@@ -108,12 +108,37 @@ M1.1 → M1.2 → **M1.3 (Facade)** → M1.4 → M1.5 → {M1.6, M1.7} → M1.8 
 ## M1.7 — Concurrency, Versioning & Corrections
 - **Objective:** safe concurrent evolution + versioning.
 - **Scope:** monotonic seq; state_version; optimistic concurrency (stale-version reject); owner-exclusive section writes (R/W matrix); corrections only via events. **Out:** distributed/multi-process.
-- **Components:** `packages/state/_concurrency.py` (private) + R/W-matrix data; `tests/state/test_concurrency.py`.
 - **Dependencies:** M1.4, M1.5.
-- **Acceptance Criteria:** disjoint appends interleave; stale-version rejected; non-owner write rejected; no mutate/delete path.
-- **Automated Tests:** interleaved appends; stale-version; owner-violation; log-immutability; R/W conformance.
-- **Exit Criteria:** enforced + tested; green gate.
 - **Complexity:** Med–High. **Risks:** ordering/races → deterministic seq + conflict tests.
+
+### As-built (delivered 2026-07-02..04; supersedes the original single-module plan)
+
+The original sketch (`packages/state/_concurrency.py` + `tests/state/test_concurrency.py`)
+was **not** built. M1.7 was decomposed into eight approval-gated sub-milestones
+(design contract: `M1.7-Design.md`, decisions D1–D6), delivered as the
+`packages/state/append/` package plus supporting modules:
+
+| Sub | Delivered | Modules |
+|---|---|---|
+| M1.7.1 | snapshot semantics (D1) | `facade.py` (get_state deep-copy, from_state copy-on-ingest) |
+| M1.7.2 | fold-derived `state_version`; `PROJECTION_VERSION` 1→2 (D4) | `projection.py` |
+| M1.7.3 | append pipeline (S1–S6) | `append/{errors,result,sequencing,versioning,guard,commit,pipeline}.py`; facade event API (`append_event`/`append_events`/`current_version`/`current_sequence`; `validate()→ValidationReport`) |
+| M1.7.4 | replay integrity | `append/integrity.py` (`verify_log`/`verify_pair`, `ReplayErrorCode`) |
+| M1.7.5 | gate-entry rules (TD-002) + traceability dispositions (TD-004) | `validation/lifecycle.py` (LIFE-005..008); `scripts/generate_traceability.py` |
+| M1.7.6 | R/W ownership as **data** (enforcement deferred to M6) | `ownership.py`; traceability `ownership` dataset |
+| M1.7.7 | performance baselines (TD-010) | `tests/perf/test_m1_7_bench.py`; `docs/performance/baselines.md` |
+| M1.7.8 | closure (TD-008/009), completion report | this doc; `docs/reviews/M1.7-Completion-Report.md` |
+
+- **Public surface:** the M1.3 facade was extended by the reserved event API
+  (four methods above) — the only public addition; append internals are private.
+- **Owner-exclusive writes:** shipped as **data** (`state.ownership`), not runtime
+  enforcement — the R/W matrix + section/event ownership datasets; role
+  enforcement is deferred to M6 (TD-003).
+- **Automated tests:** per-sub-milestone suites under `tests/state/append/`,
+  `tests/state/validation/`, `tests/state/`, `tests/perf/` — sequence/version
+  arithmetic, guard decisions, atomic-commit invariants, facade contracts,
+  replay R1–R18, gate-entry rules, ownership completeness, baselines.
+- **Exit Criteria:** met — green gate throughout; see the M1.7 Completion Report.
 
 ## M1.8 — Persistence (append / save / load)
 - **Objective:** durable file-backed event log + snapshot.
