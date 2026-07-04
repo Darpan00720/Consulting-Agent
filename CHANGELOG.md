@@ -7,6 +7,18 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.8 — Persistence (append / save / load) — in progress
+#### Added
+- **M1.8-S1 — persistence package skeleton** (`packages/persistence/`, sibling to
+  `state`; DD-1 keeps `state` IO-free): the persistence **error taxonomy**
+  (`PersistenceError(StratAgentError)` + `MissingArtifactError` / `TornWriteError`
+  / `CorruptArtifactError` / `IncompatibleVersionError`, each with a stable
+  `PersistenceErrorCode`) and the **storage-layout constants** (`paths.py` —
+  `engagements/<slug>/{events.log,state.json,manifest.json}`, constants only,
+  no IO). Public surface is only the error taxonomy; `EngagementStore` and
+  save/load arrive in later slices. `engagements/*/` gitignored (P-DD-C, README
+  kept). No IO, no serialization, no store yet.
+
 ### M1.7 — Concurrency, Versioning & Corrections — complete (2026-07-04)
 Writable Engagement State: snapshot semantics, the append pipeline + facade
 event API, replay integrity, gate-entry validation rules, ownership as data,
