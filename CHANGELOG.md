@@ -7,8 +7,25 @@ first tagged release.
 
 ## [Unreleased]
 
-### M1.8 — Persistence (append / save / load) — in progress
+### M1.8 — Persistence (append / save / load) — complete
 #### Added
+- **M1.8-S5 — persistence finalization** (docs / API-freeze / benchmarks /
+  integration; **no behavioural change**). Froze the public surface at exactly
+  seven names (`EngagementStore` + the six error types) with pinned
+  `EngagementStore` method signatures (`tests/persistence/test_api_freeze.py`).
+  Added end-to-end integration tests (`test_integration.py`):
+  save→load→append→save continuity, N-cycle byte-identical determinism
+  (PER-011), a process-restart simulation (fresh `EngagementStore` on the same
+  root stays append-capable, PER-007), and the canonical-projection invariant
+  (persisted snapshot `== project(log)`, `verify_pair` always passes). Added
+  `save`/`load`/checksum-verification benchmarks (`tests/perf/test_m1_8_bench.py`)
+  under the existing cold-run methodology, recorded in
+  `docs/performance/baselines.md`. New public API reference
+  `docs/api/Persistence.md` states explicitly that **persistence stores
+  canonical projected snapshots rather than runtime incremental state** and why
+  `verify_pair` therefore always succeeds for persisted artifacts. Persistence
+  package coverage 100%; `packages/state` zero-diff. See the
+  [M1.8 Completion Report](docs/reviews/M1.8-Completion-Report.md).
 - **M1.8-S4 — `EngagementStore` (save/load orchestration)** (`persistence/store.py`,
   public): composes `format` + `atomic` + `verify_log`/`verify_pair` +
   `project` + `AppendPipeline` — never duplicating them. **save** (read

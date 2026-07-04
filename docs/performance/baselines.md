@@ -1,6 +1,6 @@
 ---
 title: Performance Baselines (consolidated)
-status: Baseline — M1.7.7
+status: Baseline — M1.7.7 (state layer) + M1.8-S5 (persistence)
 date: 2026-07-04
 supersedes: docs/performance/projection-baseline.md (M1.5 original, kept for history)
 relates: [tests/perf/*]
@@ -75,6 +75,17 @@ operation ran.
 (The M1.5 original `projection-baseline.md` is kept for history; its numbers
 are a different single-run and differ within variance.)
 
+### Persistence (M1.8-S5 — `save` / `load` / checksum verification)
+Measured with the same harness on the same machine (single cold run per scale;
+`tests/perf/test_m1_8_bench.py`). `save`/`load` include real filesystem IO
+(`fsync` on each of three files + directory), which dominates at small N.
+
+| Operation | Complexity | 10 | 100 | 1,000 | 10,000 |
+|---|---|---|---|---|---|
+| `save` (log size) | O(n) serialize + SHA-256 + 3 atomic writes | ~0.76 ms | ~1.4 ms | ~9.3 ms | ~183 ms |
+| `load` (log size) | O(n) read + decode + verify_log + verify_pair + fold | ~0.21 ms | ~0.57 ms | ~5.7 ms | ~72.7 ms |
+| checksum verify (log size) | O(bytes) two SHA-256 digests | ~9 µs | ~34 µs | ~289 µs | ~2.6 ms |
+
 ## Interpretation
 - **`append_event` is validation-dominated and log-independent** — it stays
   well under ~100 µs to 1,000 objects and ~1 ms at 10,000, tracking the
@@ -90,9 +101,15 @@ are a different single-run and differ within variance.)
   measured first, per policy.
 - **Replay verification is cheap and linear** (~1.6–1.8 ms at 10,000 events),
   run once per load/replay — negligible against the fold it guards.
-- **All operations are comfortably sub-millisecond at engagement scale**
-  (hundreds to low thousands of objects/events), which is the regime ADR-002
-  targets.
+- **All state-layer operations are comfortably sub-millisecond at engagement
+  scale** (hundreds to low thousands of objects/events), which is the regime
+  ADR-002 targets.
+- **`save`/`load` are `fsync`-bound at small N and O(n) at scale.** At
+  engagement scale (≤ ~1,000 events) `save` is ~1–9 ms and `load` ~0.2–5.7 ms;
+  the fixed `fsync` floor (~0.2–0.8 ms) dominates for tiny logs. `load` is
+  cheaper than `save` (reads need no `fsync`) and its verification steps
+  (`verify_log` + `verify_pair`, both O(n)) are a small fraction of the fold.
+  Checksum verification is negligible (~µs to a few ms) — never the bottleneck.
 
 ## Scope notes
 Deliberately **not** benchmarked (M1.7.7 design, approved): `project` beyond the
