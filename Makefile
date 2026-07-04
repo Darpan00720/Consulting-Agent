@@ -1,4 +1,4 @@
-.PHONY: install fmt lint format typecheck test cov schema traceability check hooks vault-index
+.PHONY: install fmt lint format typecheck test cov schema traceability bench check hooks vault-index
 
 install:
 	uv sync
@@ -20,6 +20,10 @@ test:
 
 cov:
 	uv run pytest --cov=state --cov-report=term-missing
+
+# Performance baselines only (regression references, not gates).
+bench:
+	uv run pytest tests/perf
 
 schema:
 	PYTHONPATH=packages uv run python scripts/generate_schema.py
