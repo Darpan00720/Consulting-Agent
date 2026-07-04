@@ -14,9 +14,13 @@ from typing import Annotated, TypeAlias
 
 from pydantic import Field
 
-Identifier: TypeAlias = str
-Reference: TypeAlias = str
-ConfidenceScore: TypeAlias = Annotated[float, Field(ge=0.0, le=1.0)]
+# PEP 695 `type` aliases (UP040) are deferred (BACKLOG TD-012): converting
+# ConfidenceScore to a lazy `type` alias risks pydantic's resolution of the
+# Annotated Field constraint, and this milestone (M1.7.8) makes no runtime
+# behaviour change. Revisit when adopting PEP 695 syntax repo-wide.
+Identifier: TypeAlias = str  # noqa: UP040
+Reference: TypeAlias = str  # noqa: UP040
+ConfidenceScore: TypeAlias = Annotated[float, Field(ge=0.0, le=1.0)]  # noqa: UP040
 
 
 def new_id() -> str:

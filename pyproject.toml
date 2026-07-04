@@ -2,7 +2,7 @@
 name = "stratagent"
 version = "0.0.0"
 description = "StratAgent — AI management-consulting platform (implementation)"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -28,7 +28,7 @@ dev = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 src = ["packages", "scripts", "tests"]
 
 [tool.ruff.lint]
@@ -48,10 +48,10 @@ known-first-party = [
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 namespace_packages = true
 explicit_package_bases = true

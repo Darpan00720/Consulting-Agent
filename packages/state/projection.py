@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from functools import singledispatch
-from typing import Any, TypeVar
+from typing import Any
 
 from common.models import DomainObject
 from state.enums import LifecycleStatus
@@ -99,8 +99,6 @@ PROJECTION_VERSION = 2
 # Fixed origin timestamp so projection stays deterministic for objects it builds.
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
-_T = TypeVar("_T", bound=DomainObject)
-
 _ANALYSIS_FIELDS = {
     "financial": "financial_analysis",
     "market": "market_analysis",
@@ -124,7 +122,9 @@ def _initial_state() -> EngagementState:
     )
 
 
-def _replace(items: list[_T], target_id: str, changes: dict[str, Any]) -> list[_T]:
+def _replace[T: DomainObject](
+    items: list[T], target_id: str, changes: dict[str, Any]
+) -> list[T]:
     """Return a new list with the item whose id == target_id updated (pure)."""
     return [
         item.model_copy(update=changes) if item.id == target_id else item
