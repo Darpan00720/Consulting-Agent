@@ -9,6 +9,15 @@ first tagged release.
 
 ### M1.8 — Persistence (append / save / load) — in progress
 #### Added
+- **M1.8-S3 — atomic filesystem primitives** (`persistence/atomic.py`, internal;
+  the sole IO-authority module): `atomic_write` (temp → flush → fsync →
+  `os.replace` → dir fsync — atomic visibility, PER-015; byte-exact, PER-017),
+  `append_bytes` (durable append + fsync, for the event log), `read_bytes`
+  (absent → `MissingArtifactError`). Works **only in bytes** — no
+  serialization, no hashing, no engagement construction. It is the **only**
+  persistence module permitted to `replace`/`rename`/`fsync`/create temp files
+  (PER-016, source-scan tested). On any pre-commit failure the target is
+  untouched and no stray temp remains.
 - **M1.8-S2 — persistence codec** (`persistence/format.py`, internal; pure): the
   on-disk format — `dump_log`/`load_log` (NDJSON, one `Event` per line, seq
   order), `dump_snapshot`/`load_snapshot` (`EngagementState` JSON), and a minimal

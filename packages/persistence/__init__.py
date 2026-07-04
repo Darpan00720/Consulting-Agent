@@ -12,8 +12,9 @@ does not change the frozen 10-method public API.
 
 Public surface: only the persistence error taxonomy is exposed today. The
 implementation modules — ``paths`` (S1), ``format`` (S2: the pure codec +
-``Manifest``), and the future ``atomic``/``store`` — remain **internal**;
-``EngagementStore`` and ``save``/``load`` arrive in later slices.
+``Manifest``), ``atomic`` (S3: the sole atomic-IO authority), and the future
+``store`` — remain **internal**; ``EngagementStore`` and ``save``/``load``
+arrive in a later slice.
 """
 
 from persistence.errors import (
