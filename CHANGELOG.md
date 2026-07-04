@@ -9,6 +9,35 @@ first tagged release.
 
 ### M1.8 — Persistence (append / save / load) — in progress
 #### Added
+- **M1.8-S4 — `EngagementStore` (save/load orchestration)** (`persistence/store.py`,
+  public): composes `format` + `atomic` + `verify_log`/`verify_pair` +
+  `project` + `AppendPipeline` — never duplicating them. **save** (read
+  committed log → build canonical snapshot `project(log)` → SHA-256 → serialize
+  → atomic-write `events.log` → `state.json` → `manifest.json`, manifest last as
+  the commit marker); **load** (read manifest → state → log → verify checksums →
+  decode → `verify_log` → `verify_pair` → reconstruct an append-capable
+  `Engagement`; no replay, no repair, no reprojection). The store exclusively
+  owns directory creation and SHA-256 (only `store.py` imports `hashlib`;
+  source-scan tested, incl. `packages/state/**`). Errors mapped:
+  missing→`MissingArtifactError`, malformed/checksum→`CorruptArtifactError`,
+  unsupported version→`IncompatibleVersionError`, missing/partial
+  manifest→`TornWriteError`; unexpected `OSError` wrapped (never leaked).
+  Deterministic (PER-011: `save(load(save(E)))` byte-identical) and
+  no-partial-visibility (PER-012: interrupted save is never loadable). Reads the
+  committed log via the approved `_pipeline` seam (P-DD-A). Invariants
+  S4-1..S4-16.
+  - **Canonical persistence representation (M1.8-S4 projection decision).** The
+    persisted snapshot is the canonical projection `project(log)`, **not** the
+    runtime `committed.state`. Runtime incremental state is an implementation
+    detail: `apply` stamps only `state_version` and inherits `projection_version`
+    from `create` (0), so a live snapshot carries stale projection provenance.
+    Save normalizes the snapshot through the projection engine
+    (`projection_version` → `PROJECTION_VERSION`) so every persisted
+    `(log, snapshot)` pair satisfies `verify_pair` on load with no replay or
+    repair. The contract preserves the event log, domain state, version, and
+    append capability exactly — **canonical engagement semantics** — normalizing
+    only projection provenance. `verify_pair` remains frozen and unchanged; no
+    bypass, no relaxation of replay integrity. S4-16 permanently documents this.
 - **M1.8-S3 — atomic filesystem primitives** (`persistence/atomic.py`, internal;
   the sole IO-authority module): `atomic_write` (temp → flush → fsync →
   `os.replace` → dir fsync — atomic visibility, PER-015; byte-exact, PER-017),

@@ -10,11 +10,10 @@ Approved private seam (P-DD-A): to read an engagement's committed log for
 ``engagement._pipeline.committed()``. It introduces no new facade accessor and
 does not change the frozen 10-method public API.
 
-Public surface: only the persistence error taxonomy is exposed today. The
-implementation modules — ``paths`` (S1), ``format`` (S2: the pure codec +
-``Manifest``), ``atomic`` (S3: the sole atomic-IO authority), and the future
-``store`` — remain **internal**; ``EngagementStore`` and ``save``/``load``
-arrive in a later slice.
+Public surface: :class:`EngagementStore` (save/load) and the persistence error
+taxonomy. The implementation modules — ``paths`` (S1), ``format`` (S2: codec +
+``Manifest``), ``atomic`` (S3: the sole atomic-IO authority), and ``store``'s
+internals — remain internal.
 """
 
 from persistence.errors import (
@@ -25,9 +24,11 @@ from persistence.errors import (
     PersistenceErrorCode,
     TornWriteError,
 )
+from persistence.store import EngagementStore
 
 __all__ = [
     "CorruptArtifactError",
+    "EngagementStore",
     "IncompatibleVersionError",
     "MissingArtifactError",
     "PersistenceError",

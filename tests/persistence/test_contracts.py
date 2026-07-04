@@ -98,9 +98,12 @@ def test_paths_module_performs_no_io() -> None:
 # --- curated exports / no accidental public surface --------------------------
 
 
-def test_public_surface_is_exactly_the_error_taxonomy() -> None:
+def test_public_surface_is_error_taxonomy_plus_store() -> None:
+    # S4 adds exactly one public name — the EngagementStore entry point —
+    # to the S1 error taxonomy; nothing else leaks into the surface.
     assert set(persistence.__all__) == {
         "CorruptArtifactError",
+        "EngagementStore",
         "IncompatibleVersionError",
         "MissingArtifactError",
         "PersistenceError",
@@ -112,9 +115,10 @@ def test_public_surface_is_exactly_the_error_taxonomy() -> None:
     assert set(persistence.__all__) <= public
 
 
-def test_store_and_io_not_yet_exposed() -> None:
-    # EngagementStore / save / load arrive in later slices — not at S1
-    assert not hasattr(persistence, "EngagementStore")
+def test_store_exposed_but_no_module_level_io() -> None:
+    # S4 exposes the EngagementStore class; save/load are its methods, never
+    # module-level functions (IO is orchestrated only through the store).
+    assert hasattr(persistence, "EngagementStore")
+    assert "EngagementStore" in persistence.__all__
     assert not hasattr(persistence, "save")
     assert not hasattr(persistence, "load")
-    assert "EngagementStore" not in persistence.__all__
