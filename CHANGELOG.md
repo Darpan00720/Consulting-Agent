@@ -9,6 +9,21 @@ first tagged release.
 
 ### M1.7 — Concurrency, Versioning & Corrections — in progress
 #### Added
+- **M1.7.7 — performance baselines** (measurement + docs only; no behaviour
+  change): benchmarks for the append write path (`append_event`,
+  `append_events`), the `get_state` snapshot, and replay verification
+  (`verify_log`, `verify_pair`) in `tests/perf/test_m1_7_bench.py`, plus a
+  `make bench` target. One consolidated `docs/performance/baselines.md` now
+  records projection, validation, append, snapshot, and replay baselines with a
+  fresh environment block, complexity, interpretation, and limitations — the
+  M1.5 `projection-baseline.md` is retained for history and points to it.
+  **Closes TD-010** (the validation baseline was published only in test output).
+  Reuses the established single-run `pedantic` methodology (10/100/1k/10k);
+  baselines are regression references, never gates — no benchmark asserts a
+  latency threshold. Confirmed the design's headline claims: `append_event` is
+  validation-dominated and log-independent (~1 ms at 10k objects), `get_state`
+  is the O(state) deep-copy price of snapshot isolation (~73 ms at 10k),
+  replay verification is cheap and linear (~1.6–1.8 ms at 10k events).
 - **M1.7.6 — ownership matrices as data** (`state/ownership.py`, internal — no
   enforcement, no public-API change): `Role` (ADR-005 names + externals +
   ADR-002 collective markers; seeds M6's role registry), `COMPONENT_OWNERSHIP`

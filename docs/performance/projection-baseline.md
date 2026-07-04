@@ -8,6 +8,11 @@ tags: [performance, projection, baseline]
 
 # Projection Performance Baseline
 
+> **Superseded (M1.7.7):** the consolidated authority is now
+> [`baselines.md`](baselines.md), which covers projection alongside validation,
+> the append path, snapshots, and replay. This M1.5 document is retained for
+> history.
+
 Recorded baseline timings for `state.projection.project` (folding an event log into an
 `EngagementState`). These are **indicative regression references, not optimization
 targets** — per the M1.5 constraint, projection is not optimized unless a measurement
