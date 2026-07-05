@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "pyyaml>=6.0.3",
 ]
 
 # M0 uses a uv-managed "virtual project": dependencies + venv are managed, but the
@@ -24,6 +25,7 @@ dev = [
     "pytest-cov>=5",
     "pytest-benchmark>=4",
     "pre-commit>=3.8",
+    "types-pyyaml>=6.0.12.20260518",
 ]
 
 [tool.ruff]
