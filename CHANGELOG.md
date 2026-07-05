@@ -7,6 +7,39 @@ first tagged release.
 
 ## [Unreleased]
 
+### M1.9 — Replay Engine (replay & recovery) — complete
+#### Added
+- **`packages/replay`** — a new sibling package that rebuilds engagements from
+  event logs. Pure orchestration over frozen seams; `packages/state` and
+  `packages/persistence` are **zero-diff** across the whole milestone, and
+  `verify_log`/`verify_pair`/`project`/`AppendPipeline`/`make_committed`/
+  `EngagementStore` are unchanged. Public surface (frozen, 6 names):
+  `ReplayEngine`, `ReplayContract`, `replay`, `recover`, `ReplayError`, and the
+  re-exported frozen `ReplayIntegrityError`.
+  - **`replay(log)`** rebuilds an append-capable `Engagement` via the single
+    fixed pipeline `verify_log → project → verify_pair → AppendPipeline(…,
+    append_supported=True)` (`make_committed` runs transitively; no alternate
+    path, no mutation, no fabrication, no repair — RP-001, RP-017).
+  - **`recover(log, snapshot)`** rebuilds from a persisted `(log, snapshot)`
+    pair; a valid pair rebuilds from the snapshot, a `PROJECTION_STALE` pair is
+    upgraded by whole-log re-projection (the only migration mechanism). Recovery
+    never writes persistence, mutates the snapshot, or suppresses integrity
+    failures; persisting an upgraded snapshot is the caller's job via
+    `EngagementStore.save` (DD-7 no-autosave preserved).
+  - **Errors:** `ReplayError` is an additive orchestration-only base (no new
+    codes); integrity defects surface as the frozen `ReplayIntegrityError`.
+  - **Invariants RP-001…RP-034** (replay contract, purity, determinism,
+    fold-equivalence, recovery, property/stress, benchmarks) — see
+    `docs/reviews/M1.9-Completion-Report.md`. Replay package **100% covered**.
+- **Docs:** `docs/api/Replay.md` (public API reference),
+  `docs/reviews/M1.9-Completion-Report.md`, `docs/architecture/replay-layer.md`
+  (records replay as an implemented layer; Architecture v1.0 stays frozen),
+  replay baselines in `docs/performance/baselines.md`.
+- **Delivered across seven approval-gated phases** — design (`c61df51`),
+  skeleton (`d894266`), replay (`b244afb`), recovery (`54d67b8`), property/stress
+  suite (`252f428`), benchmarks (`e483296`), finalization (Phase 7). See
+  `docs/implementation/M1.9-Design.md` (APPROVED).
+
 ### M1.8 — Persistence (append / save / load) — complete
 #### Added
 - **M1.8-S5 — persistence finalization** (docs / API-freeze / benchmarks /
