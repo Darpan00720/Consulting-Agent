@@ -1,7 +1,7 @@
 ---
 title: Performance Baselines (consolidated)
-status: Baseline — M1.7.7 (state layer) + M1.8-S5 (persistence)
-date: 2026-07-04
+status: Baseline — M1.7.7 (state layer) + M1.8-S5 (persistence) + M1.9 (replay)
+date: 2026-07-05
 supersedes: docs/performance/projection-baseline.md (M1.5 original, kept for history)
 relates: [tests/perf/*]
 ---
@@ -86,6 +86,24 @@ Measured with the same harness on the same machine (single cold run per scale;
 | `load` (log size) | O(n) read + decode + verify_log + verify_pair + fold | ~0.21 ms | ~0.57 ms | ~5.7 ms | ~72.7 ms |
 | checksum verify (log size) | O(bytes) two SHA-256 digests | ~9 µs | ~34 µs | ~289 µs | ~2.6 ms |
 
+### Replay (M1.9 Phase 6 — `replay` / `recover` / frozen seams)
+Measured with the same harness on the same machine (single cold run per scale;
+`tests/perf/test_m1_9_bench.py`). Replay is pure orchestration over frozen
+seams, so its cost is the fold (`project`) plus two O(n) verification passes.
+
+| Operation | Complexity | 10 | 100 | 1,000 | 10,000 |
+|---|---|---|---|---|---|
+| `replay(log)` (log size) | O(n) = verify_log + project + verify_pair | ~78 µs | ~367 µs | ~4.3 ms | ~126 ms |
+| `recover` (valid pair) | O(n) = verify_log + verify_pair (no re-projection) | ~18 µs | ~56 µs | ~0.57 ms | ~5.0 ms |
+| `recover` (stale pair) | O(n) = replay + one re-projection | ~64 µs | ~394 µs | ~4.4 ms | ~132 ms |
+| `verify_log` (log size) | O(n) single pass | ~3.3 µs | ~20 µs | ~175 µs | ~1.7 ms |
+| `verify_pair` (log size) | O(n) | ~3.3 µs | ~32 µs | ~175 µs | ~1.8 ms |
+| `project` (event count) | ~linear, mild superlinear | ~44 µs | ~331 µs | ~3.8 ms | ~127 ms |
+
+(These re-confirm the M1.7.7 `verify_*`/`project` numbers at the same scales,
+within single-run variance — `project` is the same fold. The size-0/1 points
+are warmup-dominated under a cold single run and are omitted.)
+
 ## Interpretation
 - **`append_event` is validation-dominated and log-independent** — it stays
   well under ~100 µs to 1,000 objects and ~1 ms at 10,000, tracking the
@@ -110,6 +128,13 @@ Measured with the same harness on the same machine (single cold run per scale;
   cheaper than `save` (reads need no `fsync`) and its verification steps
   (`verify_log` + `verify_pair`, both O(n)) are a small fraction of the fold.
   Checksum verification is negligible (~µs to a few ms) — never the bottleneck.
+- **`replay` is fold-bound; recovery's cost depends entirely on the path.**
+  `replay(log)` ≈ `project` + two O(n) verifications, so it tracks the fold
+  (~126 ms at 10,000, dominated by `project` ~127 ms). `recover` on a **valid**
+  pair skips re-projection and is ~25× cheaper (~5 ms at 10,000 — just the two
+  verification passes + reconstruction); `recover` on a **stale** pair pays the
+  full re-projection (~132 ms), i.e. essentially `replay`. Recovery adds no
+  asymptotic cost over the seam it wraps — it is orchestration, not new work.
 
 ## Scope notes
 Deliberately **not** benchmarked (M1.7.7 design, approved): `project` beyond the
