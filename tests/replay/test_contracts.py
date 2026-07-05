@@ -16,6 +16,7 @@ import pytest
 import replay as replay_pkg
 from common.errors import StratAgentError
 from replay import ReplayContract, ReplayEngine, ReplayError, replay
+from state import Engagement
 from state.append import ReplayIntegrityError as FrozenReplayIntegrityError
 
 _EXPECTED_SURFACE = {
@@ -44,9 +45,10 @@ def test_replay_engine_interface() -> None:
     engine = ReplayEngine()
     assert isinstance(engine, ReplayContract)  # structural conformance
     assert list(inspect.signature(ReplayEngine.replay).parameters) == ["self", "log"]
-    # skeleton: reconstruction is not implemented until Phase 3
-    with pytest.raises(NotImplementedError):
-        engine.replay([])
+    # an empty log is valid and replays to the empty engagement at version 0
+    engagement = engine.replay([])
+    assert isinstance(engagement, Engagement)
+    assert engagement.current_version() == 0
 
 
 # --- replay() contract function ----------------------------------------------
@@ -54,8 +56,8 @@ def test_replay_engine_interface() -> None:
 
 def test_replay_contract_function() -> None:
     assert list(inspect.signature(replay).parameters) == ["log"]
-    with pytest.raises(NotImplementedError):
-        replay([])
+    # delegates to a default engine; empty log -> version-0 engagement
+    assert replay([]).current_version() == 0
 
 
 # --- ReplayContract protocol -------------------------------------------------
