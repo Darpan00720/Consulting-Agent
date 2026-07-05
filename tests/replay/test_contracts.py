@@ -24,6 +24,7 @@ _EXPECTED_SURFACE = {
     "ReplayEngine",
     "ReplayError",
     "ReplayIntegrityError",
+    "recover",
     "replay",
 }
 

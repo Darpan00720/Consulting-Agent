@@ -213,9 +213,9 @@ def test_rp002_rp014_no_duplicated_frozen_logic() -> None:
         "current_sequence(",
         "next_state_version(",
         "stamp(",
-        "make_committed(",  # constructor is invoked transitively by AppendPipeline, never called here
+        "make_committed(",  # invoked transitively by AppendPipeline, never here
     ):
-        assert banned not in src, f"replay must not re-implement/compute/construct: {banned}"
+        assert banned not in src, banned
 
 
 # --- RP-015: replay is IO-free and persistence-independent (source-scan) -----
