@@ -18,9 +18,11 @@ from knowledge import (
     FrameworkNote,
     FrontmatterError,
     NoteType,
+    TemplateNote,
     parse_frontmatter,
     validate_note,
 )
+from knowledge.frontmatter import MODEL_BY_TYPE
 
 
 def _render(fields: dict[str, Any]) -> str:
@@ -189,13 +191,70 @@ def test_empty_mapping_frontmatter_rejected() -> None:
 
 def test_public_surface() -> None:
     assert set(knowledge_pkg.__all__) == {
+        "EXPECTED_CATEGORY_DIRS",
+        "REQUIRED_DOMAINS",
+        "BusinessProblemNote",
         "CommonHeader",
+        "CompanyNote",
+        "DeliverableKind",
+        "DeliverableNote",
+        "DomainNote",
         "FrameworkNote",
         "FrameworkTier",
         "FrontmatterError",
+        "IndustryNote",
+        "IssueTreeNote",
+        "KpiNote",
+        "LessonNote",
         "NoteStatus",
         "NoteType",
+        "PlaybookNote",
+        "PriorCaseNote",
+        "RecommendationNote",
+        "TemplateNote",
+        "ValidationIssue",
+        "ValidationSeverity",
+        "VaultReport",
         "Visibility",
         "parse_frontmatter",
         "validate_note",
+        "validate_vault",
     }
+
+
+# --- S2: per-type models -----------------------------------------------------
+
+
+def test_every_note_type_has_a_model() -> None:
+    # MODEL_BY_TYPE dispatches every one of the 13 note types
+    assert set(MODEL_BY_TYPE) == {t.value for t in NoteType}
+    for model in MODEL_BY_TYPE.values():
+        assert issubclass(model, CommonHeader)
+
+
+@pytest.mark.parametrize(
+    "note_type",
+    [t.value for t in NoteType if t is not NoteType.FRAMEWORK],
+)
+def test_non_framework_types_validate_at_header_level(note_type: str) -> None:
+    # every non-framework type validates with just the common header (their
+    # per-type fields are optional / unmodelled)
+    note = validate_note(_render(_common(id=f"n_{note_type}", type=note_type)))
+    assert isinstance(note, MODEL_BY_TYPE[note_type])
+    assert note.type.value == note_type
+
+
+def test_template_valid_deliverable_kind_passes() -> None:
+    note = validate_note(
+        _render(_common(id="tpl", type="template", deliverable_kind="deck"))
+    )
+    assert isinstance(note, TemplateNote)
+    assert note.deliverable_kind is not None
+    assert note.deliverable_kind.value == "deck"
+
+
+def test_template_invalid_deliverable_kind_rejected() -> None:
+    with pytest.raises(FrontmatterError):
+        validate_note(
+            _render(_common(id="tpl", type="template", deliverable_kind="slides"))
+        )

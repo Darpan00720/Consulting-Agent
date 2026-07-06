@@ -12,10 +12,14 @@ The schema is derived directly from the governing ADRs and cites them:
   D-7): the 11 required framework attributes, superseding ADR-003 §5's smaller
   framework field list.
 
-S1 is the validator core: it fully validates the common header for every note
-and the ADR-004 §3 attribute set for ``framework`` notes. Per-type field models
-for the other 12 types are additive in later slices; until then their typed
-fields are permitted but not validated (``extra="allow"``).
+S1 provided the common header + the ADR-004 §3 ``framework`` model. S2 adds a
+model for **every** note type. Requiredness is enforced **only where an ADR
+states it** (``framework`` §3); the ADR-003 §5 per-type fields are typed but
+**optional** (the ADRs do not mark them required), and the five ADR-004-added
+types (``domain``/``issue_tree``/``deliverable``/``business_problem``/
+``recommendation``) have **no** frontmatter field schema in the ADRs — only
+content/graph definitions — so they validate at the common-header level (see
+decision D-8). ``extra="allow"`` throughout keeps un-modelled fields permitted.
 """
 
 from __future__ import annotations
@@ -72,6 +76,14 @@ class FrameworkTier(StrEnum):
 
     PRIMARY = "primary"
     SUPPORTING = "supporting"
+
+
+class DeliverableKind(StrEnum):
+    """Template deliverable kind — ADR-003 §5 ``template``."""
+
+    REPORT = "report"
+    DECK = "deck"
+    MODEL = "model"
 
 
 class CommonHeader(BaseModel):
@@ -131,6 +143,113 @@ class FrameworkNote(CommonHeader):
     version: str = Field(min_length=1)
 
 
-#: Per-type model dispatch. Types absent here validate against the common header
-#: only (their typed-field models are additive in later slices).
-MODEL_BY_TYPE: dict[str, type[CommonHeader]] = {NoteType.FRAMEWORK.value: FrameworkNote}
+# --- ADR-003 §5 per-type models (fields typed but OPTIONAL — the ADR does not
+#     mark them required; only `framework` (ADR-004 §3) has a required schema). --
+
+
+class PlaybookNote(CommonHeader):
+    """ADR-003 §5 ``playbook``."""
+
+    industry: str | None = None  # ref
+    applies_to_archetypes: list[str] = []
+    kpis: list[str] = []  # refs
+    plays: list[str] = []
+
+
+class IndustryNote(CommonHeader):
+    """ADR-003 §5 ``industry`` (+ ADR-004 §6 content model)."""
+
+    structure: str | None = None
+    typical_margins: str | None = None
+    growth_rate: str | None = None
+    key_kpis: list[str] = []  # refs
+
+
+class CompanyNote(CommonHeader):
+    """ADR-003 §5 ``company``."""
+
+    industry: str | None = None  # ref
+    size: str | None = None
+    geo: str | None = None
+    segments: list[str] = []
+    kpis: list[str] = []  # refs
+
+
+class KpiNote(CommonHeader):
+    """ADR-003 §5 ``kpi`` (+ ADR-004 §5 KPI library)."""
+
+    formula: str | None = None
+    unit: str | None = None
+    benchmark: str | None = None
+    industry: str | None = None  # ref
+
+
+class PriorCaseNote(CommonHeader):
+    """ADR-003 §5 ``prior_case``."""
+
+    archetype: str | None = None
+    client_anon: str | None = None
+    frameworks: list[str] = []  # refs
+    recommendation: str | None = None
+    outcome: str | None = None
+
+
+class LessonNote(CommonHeader):
+    """ADR-003 §5 ``lesson``."""
+
+    applies_to: str | None = None
+    framework_ref: str | None = None  # ref
+    source_engagement: str | None = None
+
+
+class TemplateNote(CommonHeader):
+    """ADR-003 §5 ``template`` — the one enum-typed per-type field."""
+
+    deliverable_kind: DeliverableKind | None = None
+
+
+# --- ADR-004-added types: no frontmatter field schema in the ADRs (D-8) —
+#     validated at the common-header level. A few clearly-inferred optional
+#     fields are typed where a section implies them; nothing is required. -------
+
+
+class DomainNote(CommonHeader):
+    """ADR-004 §2 ``domain`` — content only in the ADR; header-level validation."""
+
+
+class IssueTreeNote(CommonHeader):
+    """ADR-004 §4 ``issue_tree`` — instantiates one or more frameworks (§4)."""
+
+    frameworks: list[str] = []  # refs (§4: "instantiate one or more frameworks")
+
+
+class DeliverableNote(CommonHeader):
+    """ADR-004 §7 ``deliverable`` — content only in the ADR; header-level."""
+
+
+class BusinessProblemNote(CommonHeader):
+    """ADR-004 §8 ``business_problem`` — graph only in the ADR; header-level."""
+
+
+class RecommendationNote(CommonHeader):
+    """ADR-004 §8 ``recommendation`` — graph only in the ADR; header-level."""
+
+
+#: Per-type model dispatch — a model for **every** note type (S2). Unmodelled
+#: fields are permitted (``extra="allow"``); requiredness is enforced only where
+#: an ADR states it.
+MODEL_BY_TYPE: dict[str, type[CommonHeader]] = {
+    NoteType.FRAMEWORK.value: FrameworkNote,
+    NoteType.PLAYBOOK.value: PlaybookNote,
+    NoteType.INDUSTRY.value: IndustryNote,
+    NoteType.COMPANY.value: CompanyNote,
+    NoteType.KPI.value: KpiNote,
+    NoteType.PRIOR_CASE.value: PriorCaseNote,
+    NoteType.LESSON.value: LessonNote,
+    NoteType.TEMPLATE.value: TemplateNote,
+    NoteType.DOMAIN.value: DomainNote,
+    NoteType.ISSUE_TREE.value: IssueTreeNote,
+    NoteType.DELIVERABLE.value: DeliverableNote,
+    NoteType.BUSINESS_PROBLEM.value: BusinessProblemNote,
+    NoteType.RECOMMENDATION.value: RecommendationNote,
+}
