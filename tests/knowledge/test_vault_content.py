@@ -191,3 +191,92 @@ def test_missing_directory_warnings_reduced_after_s4a() -> None:
         "business-problems/" in m for m in missing
     ), "business-problems/ dir should exist after S4A"
     assert len(missing) == 3  # only deliverables, prior-cases, recommendations
+
+
+# ── M2-S4B content tests ───────────────────────────────────────────────────
+
+
+def test_s4b_kpi_catalog_authored() -> None:
+    kpi_dir = _VAULT / "kpis"
+    assert kpi_dir.is_dir(), "kpis/ directory missing"
+    kpis = list(kpi_dir.glob("*.md"))
+    assert len(kpis) == 14  # per ADR-004 §5 canonical catalog
+
+
+def test_s4b_industry_catalog_authored() -> None:
+    ind_dir = _VAULT / "industries"
+    assert ind_dir.is_dir(), "industries/ directory missing"
+    industries = list(ind_dir.glob("*.md"))
+    assert len(industries) == 10  # per ADR-004 §6 industry model
+
+
+def test_all_kpi_notes_are_draft() -> None:
+    for path in (_VAULT / "kpis").glob("*.md"):
+        note = validate_note(path.read_text(encoding="utf-8"))
+        assert note.status.value == "draft", f"{path.name} must be draft"
+
+
+def test_all_industry_notes_are_draft() -> None:
+    for path in (_VAULT / "industries").glob("*.md"):
+        note = validate_note(path.read_text(encoding="utf-8"))
+        assert note.status.value == "draft", f"{path.name} must be draft"
+
+
+def test_kpi_notes_correct_type() -> None:
+    for path in (_VAULT / "kpis").glob("*.md"):
+        note = validate_note(path.read_text(encoding="utf-8"))
+        assert note.type is NoteType.KPI, f"{path.name} must have type=kpi"
+
+
+def test_industry_notes_correct_type() -> None:
+    for path in (_VAULT / "industries").glob("*.md"):
+        note = validate_note(path.read_text(encoding="utf-8"))
+        assert note.type is NoteType.INDUSTRY, f"{path.name} must have type=industry"
+
+
+def test_kpi_notes_link_to_domains() -> None:
+    import re
+
+    wikilink_re = re.compile(r"\[\[([^\]]+)\]\]")
+    for path in sorted((_VAULT / "kpis").glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        has_domain_link = any(
+            "domains/" in m.group(1) for m in wikilink_re.finditer(text)
+        )
+        assert has_domain_link, f"{path.name} must contain a [[domains/...]] wikilink"
+
+
+def test_industry_notes_link_to_domains() -> None:
+    import re
+
+    wikilink_re = re.compile(r"\[\[([^\]]+)\]\]")
+    for path in sorted((_VAULT / "industries").glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        has_domain_link = any(
+            "domains/" in m.group(1) for m in wikilink_re.finditer(text)
+        )
+        assert has_domain_link, f"{path.name} must contain a [[domains/...]] wikilink"
+
+
+def test_ltv_cac_links_component_kpis() -> None:
+    import re
+
+    wikilink_re = re.compile(r"\[\[([^\]]+)\]\]")
+    ltv_cac = (_VAULT / "kpis" / "ltv-cac-ratio.md").read_text(encoding="utf-8")
+    links = {m.group(1).split("|")[0] for m in wikilink_re.finditer(ltv_cac)}
+    assert any("kpis/ltv" in lk for lk in links), "ltv-cac-ratio must link to kpis/ltv"
+    assert any("kpis/cac" in lk for lk in links), "ltv-cac-ratio must link to kpis/cac"
+
+
+def test_total_vault_note_count_after_s4b() -> None:
+    assert len(_notes()) == 132  # 108 S3+S4A + 14 KPIs + 10 industries
+
+
+def test_missing_directory_warnings_unchanged_after_s4b() -> None:
+    report = validate_vault(_VAULT)
+    missing = {i.message for i in report.warnings if i.rule == "missing_directory"}
+    assert not any("kpis/" in m for m in missing), "kpis/ dir should exist after S4B"
+    assert not any(
+        "industries/" in m for m in missing
+    ), "industries/ dir should exist after S4B"
+    assert len(missing) == 3  # deliverables, prior-cases, recommendations only
