@@ -34,6 +34,8 @@ ruvector.db
 
 # Graphify vault index outputs (regenerable via 'make vault-index')
 knowledge-vault/graphify-out/
+# Stray root-level graphify-out (side effect of running graphify from repo root)
+/graphify-out/
 .claude-flow/tasks/
 
 # Persisted engagement runtime artifacts (M1.8, P-DD-C) — keep the convention README

@@ -6,6 +6,7 @@ milestone: M3 (Knowledge indexing & retrieval)
 baseline: HEAD 95cf79b; Architecture v1.0 FROZEN; M2 complete (vault + validator frozen, 28-symbol API)
 governing_adr: ADR-003 (Knowledge Architecture), ADR-005 (Agent Specifications); no ADR modified by this milestone
 evidence_policy: every statement tagged [Verified] / [Inference] / [Unknown]
+phase1a_evidence: incorporated 2026-07-08 — graphify update run against all 132 vault notes; node/edge schema fully verified; D-10 and D-11 resolved
 ---
 
 # M3 — Knowledge Indexing & Retrieval (Design, Phase 1)
@@ -71,8 +72,9 @@ via the Knowledge Agent only"; ADR-003 §8; ADR-005 Knowledge Agent contract]
   [Verified — Roadmap M8]
 - **Dedicated graph DB** — ADR-003 §12 future trigger.
   [Verified — ADR-003 §12]
-- **Embedding/vector index** — see D-11; may be partial M3, may be deferred.
-  [Unknown — see §19]
+- **Embedding/vector index** — D-11 resolved: `graphify update` produces no
+  embeddings. Semantic extraction requires GEMINI_API_KEY and a separate
+  invocation; deferred to M3-S2 or later. [Verified Phase 1A — see §19 D-11]
 
 ---
 
@@ -90,11 +92,12 @@ via the Knowledge Agent only"; ADR-003 §8; ADR-005 Knowledge Agent contract]
   autoStart: false`. [Verified — `.mcp.json` read]
 - `knowledge-vault/graphify-out/` exists with known structure (see §6).
   [Verified — `ls graphify-out/`]
-- Current `graph.json` is **stale**: built from commit `642696ff`, 1 node
-  (`.obsidian/app.json`), 0 edges — **none of the 132 vault notes are indexed**.
-  [Verified — `graph.json` read; `GRAPH_REPORT.md` read]
+- **Phase 1A (2026-07-08):** `graphify update knowledge-vault/` run against all
+  132 vault notes. `graph.json` rebuilt: **655 nodes, 522 edges, 133 communities**;
+  `built_at_commit: 440bbf65`; 100% EXTRACTED, 0% INFERRED, token cost: 0.
+  [Verified — Phase 1A: `graph_stats` MCP + `graph.json` + `GRAPH_REPORT.md`]
 - `stat-index.json` uses **absolute paths** (portability concern).
-  [Verified — `stat-index.json` read]
+  [Verified — `stat-index.json` read; confirmed in Phase 1A]
 
 **Knowledge vault:**
 - 132 notes validated by `validate_vault` (is_valid=True, 0 errors, 3 advisory
@@ -141,7 +144,7 @@ via the Knowledge Agent only"; ADR-003 §8; ADR-005 Knowledge Agent contract]
 | V4 | `graphify-out/` is inside `knowledge-vault/` | Verified | `ls knowledge-vault/` |
 | V5 | `graph.json` format: networkx JSON — `{directed, multigraph, nodes[], links[], hyperedges[], built_at_commit}` | Verified | `graph.json` read |
 | V6 | Node schema: `{id, label, file_type, source_file, source_location, _origin, community, norm_label}` | Verified | `graph.json` nodes[0] |
-| V7 | Current graph has 1 node, 0 edges; 132 vault notes are NOT indexed | Verified | `graph.json` + `GRAPH_REPORT.md` |
+| V7 | After `graphify update knowledge-vault/` (Phase 1A): 655 nodes, 522 edges, 133 communities; `built_at_commit: 440bbf65`; all 132 vault notes indexed | Verified — Phase 1A | `graph_stats` MCP + `graph.json` + `GRAPH_REPORT.md` |
 | V8 | `graphify update <path>` rebuilds without LLM | Verified | `graphify --help` |
 | V9 | `validate_vault` excludes `graphify-out/` from note scanning | Verified | `vault_validator.py` scoping rules |
 | V10 | `knowledge-agent.md` does not exist | Verified | `ls agents/` |
@@ -150,23 +153,32 @@ via the Knowledge Agent only"; ADR-003 §8; ADR-005 Knowledge Agent contract]
 | V13 | ADR-003 §6 flags Graphify trigger + exposure contract as unverified | Verified | ADR-003 §6 `[GRAPHIFY-ASSUMPTION]` |
 | V14 | Knowledge Agent writes: Knowledge References + Evidence type=external_source | Verified | ADR-005 §3 + ADR-003 §8 |
 | V15 | `stat-index.json` uses absolute paths | Verified | `stat-index.json` |
-| V16 | Graphify JSON AST parse returns `"skipped": "data json"` for `.json` files | Verified | AST cache file read |
-| I1 | `graphify update knowledge-vault/` will produce nodes for 132 markdown notes | Inference | CLI behavior on code files; vault is all `.md` |
-| I2 | Each vault note's `id` frontmatter field should become the node `id` in the graph | Inference | ADR-003 §5 + §6 integration contract |
-| I3 | Frontmatter `[[wikilinks]]` become edges in the graph | Inference | ADR-003 §6 `[GRAPHIFY-ASSUMPTION]` pattern |
+| V16 | Per-file AST cache keys: `nodes`, `edges`, `input_tokens`, `output_tokens`; markdown notes produce `input_tokens: 0, output_tokens: 0` (AST-only, no LLM) | Verified — Phase 1A | AST cache file read (`tam-sam-som.md` cache) |
+| VP1 | Graphify markdown parsing: one `filename.md` root node per file (`L1`) + one node per H1/H2 heading; all edges within a file are `contains` type; `_origin: ast` on every node | Verified — Phase 1A | `get_node` MCP + `graph.json` nodes for `frameworks/porters-five-forces.md`, `domains/profitability.md` |
+| VP2 | Node id is derived from the **file path + heading text** (slug-normalized), NOT from the frontmatter `id` field (e.g., `frameworks_porters_five_forces_porter_s_five_forces`) | Verified — Phase 1A | `graph.json` node ids (all nodes inspected) |
+| VP3 | Frontmatter YAML fields (`id`, `type`, `visibility`, `tenant`, `status`, `domains`, etc.) do **NOT** appear as node properties in `graph.json` | Verified — Phase 1A | All node property keys: `{id, label, file_type, source_file, source_location, _origin, community, norm_label}` — no frontmatter fields present |
+| VP4 | Per-file AST cache extracts wikilinks as `references` edges (e.g., `[[domains/market-entry]]` → `references` edge); however, Graphify resolves wikilink targets **directory-relative** (not vault-root-relative); all cross-directory wikilinks resolve to non-existent paths and are dropped from `graph.json` | Verified — Phase 1A | AST cache `tam-sam-som.md`: 2 `references` edges to `frameworks/domains/market-entry.md` and `frameworks/frameworks/market-attractiveness-right-to-win.md` (both non-existent); neither appears in `graph.json` |
+| VP5 | Final `graph.json` has **0 inter-file edges**; all 522 edges are `contains` (intra-file heading hierarchy); `relation` field is always `"contains"` in the merged graph | Verified — Phase 1A | `graph.json` edge scan: `non_contains = 0`; `inter_file = 0` |
+| VP6 | Graphify produces **NO vector embeddings** for markdown content via `graphify update`; semantic extraction requires GEMINI_API_KEY/GOOGLE_API_KEY and a separate `/graphify --update` invocation inside an AI assistant | Verified — Phase 1A | `GRAPH_REPORT.md`: "Token cost: 0 input · 0 output"; no vector artifact files in `graphify-out/`; GRAPH_REPORT note: "For doc/paper/image changes run /graphify --update in your AI assistant" |
+| VP7 | Node `file_type` for `.md` files = `"document"`; community = one integer per vault note (all headings in a file share the same community) | Verified — Phase 1A | All inspected vault note nodes |
+| VP8 | Edge schema (all fields): `relation`, `confidence`, `confidence_score`, `source`, `target`, `source_file`, `source_location`, `weight`; `confidence` always `"EXTRACTED"`, `weight` always `1.0` | Verified — Phase 1A | `graph.json` link keys union |
+| VP9 | Graphify incremental rebuild works for `.md` files: `cache/stat-index.json` tracks absolute-path → `{size, mtime_ns, hash}`; `cache/ast/v0.9.3/{content_hash}.json` is the per-file AST; only files with changed content hashes are re-parsed | Verified — Phase 1A | `stat-index.json` structure + `cache/ast/v0.9.3/` directory |
+| I1 | [SUPERSEDED → VP1] `graphify update knowledge-vault/` will produce nodes for 132 markdown notes | Verified — Phase 1A | See VP1 |
+| I2 | [INVALIDATED — Phase 1A] Each vault note's `id` frontmatter field should become the node `id` in the graph | Inference | Was: ADR-003 §5 + §6 integration contract — WRONG: node id is path-derived, not frontmatter-derived (see VP2) |
+| I3 | [NUANCED — Phase 1A] Frontmatter `[[wikilinks]]` become edges in the graph | Inference | Was: ADR-003 §6 — PARTIAL: wikilinks ARE extracted as `references` in per-file AST cache BUT are dropped from `graph.json` due to directory-relative path resolution (see VP4, VP5). Net effect: 0 cross-file edges in final graph |
 | I4 | `retrieval_adapter.py` will add new symbols to `packages/knowledge` requiring freeze test update | Inference | M2 freeze test pins `__all__`; additive symbols need test update |
 | I5 | The knowledge-agent.md markdown agent will orchestrate retrieval using the Python adapter | Inference | Plugin agent pattern (other agent `.md` files); Ruflo binding |
-| U1 | How Graphify processes `.md` files: frontmatter parsing, wikilink edge extraction, body chunking | Unknown | ADR-003 `[GRAPHIFY-ASSUMPTION]`; no `.md` in current index |
-| U2 | Whether Graphify 0.9.3 produces vector embeddings for markdown content | Unknown | `update` says "no LLM needed"; no embedding file in `graphify-out/` |
-| U3 | What node labels/edge types Graphify assigns to vault notes | Unknown | Only `.json` in current graph; no markdown nodes |
-| U4 | Whether frontmatter typed fields become typed edges | Unknown | ADR-003 §6 assumption; unverified |
-| U5 | Whether Graphify propagates `visibility`/`tenant` to graph node properties | Unknown | Not in current node schema |
-| U6 | `query_graph` MCP tool parameters and result format | Unknown | Tool schema not loaded |
+| U1 | [RESOLVED — VP1, VP3, VP4] How Graphify processes `.md` files: heading-based AST nodes; no frontmatter parsing; wikilinks extracted in per-file cache but dropped from final graph due to path resolution mismatch | Verified — Phase 1A | See VP1, VP3, VP4 |
+| U2 | [RESOLVED — VP6] Whether Graphify 0.9.3 produces vector embeddings for markdown content — NO; AST extraction only | Verified — Phase 1A | See VP6 |
+| U3 | [RESOLVED — VP1] Node labels: file basename (root node) and H1/H2 heading text (section nodes); edge type in final graph: always `contains` | Verified — Phase 1A | See VP1, VP5 |
+| U4 | [RESOLVED — VP3] Frontmatter typed fields do NOT become typed edges; no frontmatter data in graph at all | Verified — Phase 1A | See VP3 |
+| U5 | [RESOLVED — VP3] `visibility`/`tenant` do NOT appear in graph node properties | Verified — Phase 1A | See VP3 |
+| U6 | `query_graph` MCP tool parameters and result format | Unknown | Tool schema loaded; exact query semantics (keyword vs. fuzzy vs. structural) unverified against vault |
 | U7 | Which git commit hash to pin for evidence (vault HEAD vs. note-specific commit) | Unknown | ADR-003 §11 says "note id + git commit hash" — ambiguous |
 | U8 | Public API of `retrieval_adapter.py` — class names, function signatures | Unknown | Not yet designed |
 | U9 | New error hierarchy for retrieval failures (`KnowledgeRetrievalError`?) | Unknown | Not in current `packages/knowledge` |
 | U10 | Whether `graphify-out/` should stay inside `knowledge-vault/` or move outside | Unknown | Current location established by M2-era experimentation |
-| U11 | Whether Graphify supports incremental rebuild (re-index only changed notes) | Unknown | `manifest.json` tracks file hashes suggesting yes; unconfirmed for `.md` |
+| U11 | [RESOLVED — VP9] Graphify supports incremental rebuild; `stat-index.json` tracks file mtime+hash; only changed files are re-parsed | Verified — Phase 1A | See VP9 |
 
 ---
 
@@ -186,20 +198,72 @@ knowledge-vault/graphify-out/
     └── ast/v0.9.3/<hash>.json  # per-file AST parse result (cached by content hash)
 ```
 
-### `graph.json` node schema (Verified, from current index)
+### `graph.json` node schema (Verified Phase 1A — vault note example)
+
+Each markdown file produces two node types: one root "file" node at L1 and one
+node per section heading. All share the same `community` integer.
 
 ```json
 {
-  "id": "obsidian_app",
-  "label": "app.json",
-  "file_type": "code",
-  "source_file": ".obsidian/app.json",
+  "id": "frameworks_porters_five_forces",
+  "label": "porters-five-forces.md",
+  "file_type": "document",
+  "source_file": "frameworks/porters-five-forces.md",
   "source_location": "L1",
   "_origin": "ast",
-  "community": 0,
-  "norm_label": "app.json"
+  "community": 29,
+  "norm_label": "porters-five-forces.md"
 }
 ```
+
+```json
+{
+  "id": "frameworks_porters_five_forces_porter_s_five_forces",
+  "label": "Porter's Five Forces",
+  "file_type": "document",
+  "source_file": "frameworks/porters-five-forces.md",
+  "source_location": "L37",
+  "_origin": "ast",
+  "community": 29,
+  "norm_label": "porter's five forces"
+}
+```
+
+**Node id derivation:** slug of `{relative_dir}_{filename_without_ext}[_{heading_slug}]`.
+Frontmatter `id` field (e.g., `fw_porters_five_forces`) does NOT appear.
+
+### `graph.json` edge schema (Verified Phase 1A)
+
+```json
+{
+  "source": "frameworks_porters_five_forces",
+  "target": "frameworks_porters_five_forces_porter_s_five_forces",
+  "relation": "contains",
+  "confidence": "EXTRACTED",
+  "confidence_score": 1.0,
+  "source_file": "frameworks/porters-five-forces.md",
+  "source_location": "L37",
+  "weight": 1.0
+}
+```
+
+All 522 edges in `graph.json` use `relation: contains`. **Zero inter-file edges.**
+
+### Wikilink behavior (Verified Phase 1A — critical finding)
+
+Graphify's per-file AST extractor DOES detect `[[wikilinks]]` as `references`
+edges in the cache file. However, target paths are resolved **directory-relative**
+(not Obsidian vault-root-relative). Example: `[[domains/market-entry]]` in
+`frameworks/tam-sam-som.md` resolves as `frameworks/domains/market-entry.md`
+(non-existent); the actual target is `domains/market-entry.md` (vault root).
+All 157 vault wikilinks are cross-directory; all resolve to non-existent paths;
+all `references` edges are dropped during graph merge.
+
+**Impact on retrieval design (D-10 resolution):** The `graph.json` graph is
+structurally heading-only. Cross-note relationships (frameworks → domains → KPIs)
+exist in vault frontmatter `domains:` fields and body wikilinks, but they
+are NOT accessible via graph traversal. Direct vault file reads and frontmatter
+parsing are the primary mechanism for cross-note retrieval in `retrieval_adapter.py`.
 
 ### `.mcp.json` graphify-mcp config (Verified)
 
@@ -286,7 +350,25 @@ models, 5 enums, `VaultReport`, `ValidationIssue`, `REQUIRED_DOMAINS`,
 └───────────────────────────────────────────────────────────────── ┘
 ```
 
-### Data flow (retrieval)
+### Revised retrieval model (Phase 1A finding)
+
+**ADR-003 §7 "hybrid retrieval (vector + graph + direct file)" is invalidated
+by Phase 1A evidence:**
+- No vectors exist (`graphify update` produces none — see VP6 / D-11 resolved)
+- Graph has no cross-note edges (wikilinks not in `graph.json` — see VP4/VP5 / D-10 resolved)
+- Graph provides only heading-structure within each note (intra-file `contains` tree)
+
+**Revised retrieval model for `retrieval_adapter.py`:**
+
+| Role | Mechanism | Rationale |
+|---|---|---|
+| Primary retrieval | Direct vault scan: read all `.md` files, `parse_frontmatter`, match query against `title`, `purpose`, `when_to_use`, `name`, `domains` fields | Only mechanism with semantic knowledge of cross-note relationships |
+| Structural supplement | `query_graph(query)` → match on heading labels (`norm_label`) | Finds notes by domain/framework heading name; supplements text-match |
+| Section targeting | `get_neighbors(node_id)` → H2 section labels for a matched note | Identifies which section of a note is most relevant to the query |
+| Tenant filter | Frontmatter `visibility` + `tenant` fields from `parse_frontmatter` | Graph nodes carry no frontmatter data (VP3); must use direct read |
+| Cross-note navigation | Direct frontmatter `domains:` field parse + wikilink text extraction | Graph edges are intra-file only; cross-note links must be followed via frontmatter |
+
+### Data flow (retrieval — revised)
 
 ```mermaid
 sequenceDiagram
@@ -294,20 +376,17 @@ sequenceDiagram
     participant KA as knowledge-agent.md
     participant RA as retrieval_adapter.py
     participant GF as graphify-mcp
-    participant GJ as graph.json
     participant VT as knowledge-vault/ (direct read)
 
     EM->>KA: need(query, tenant_id)
     KA->>RA: retrieve(query, tenant_id)
-    RA->>GF: query_graph(query, tenant_filter)
-    GF->>GJ: read
-    GJ-->>GF: matching nodes
-    GF-->>RA: candidate nodes (id, source_file, score)
-    RA->>GF: get_neighbors(node_ids)
-    GF-->>RA: related nodes + edges
-    RA->>VT: read note files (parse_frontmatter + body)
-    VT-->>RA: note content + frontmatter
-    RA->>RA: rank · dedupe · tenant-filter · pin evidence
+    RA->>VT: scan notes — parse_frontmatter(note) for each .md
+    VT-->>RA: all note frontmatter + body text
+    RA->>RA: keyword match query vs title/purpose/when_to_use/domains
+    RA->>GF: query_graph(query) — heading label match (supplement)
+    GF-->>RA: matching section nodes (intra-file structural context)
+    RA->>RA: tenant-filter — visibility=global OR (tenant AND tenant=tenant_id)
+    RA->>RA: rank · dedupe · pin evidence (note.id + git HEAD commit)
     RA-->>KA: list[RetrievalResult(note_id, commit_hash, ...)]
     KA->>ES: write KnowledgeReferences + Evidence
 ```
@@ -320,8 +399,11 @@ sequenceDiagram
 
 - **Input:** `knowledge-vault/` tree (excluding `graphify-out/`, `_attachments/`,
   `.obsidian/`, `_meta/`)
-- **Output:** `graphify-out/graph.json` (updated nodes + edges), `manifest.json`
-  (updated file hashes), `GRAPH_REPORT.md`, community labels
+- **Output (Phase 1A verified):** `graphify-out/graph.json` (655 nodes, 522 edges
+  for 132 notes; all `contains` edges; 0 inter-file edges); `GRAPH_REPORT.md`;
+  `.graphify_labels.json`; `.graphify_root`; `cache/stat-index.json`;
+  `cache/ast/v0.9.3/{hash}.json` per file; `graph.html` (visualization)
+- **NOT produced:** vector embeddings, semantic index, embedding files
 - **Precondition:** `validate_vault(Path("knowledge-vault"))` returns
   `is_valid=True` — indexer must not run on an invalid vault
 - **Must NOT:** modify any vault note; index `graphify-out/` recursively;
@@ -504,33 +586,40 @@ knowledge-vault/  →  (indexed by) graphify update →  graphify-out/graph.json
 
 2. Run Graphify:
      graphify update knowledge-vault/
-     Output: graphify-out/graph.json (132 nodes + edges)
-             graphify-out/manifest.json (per-file hash + mtime)
+     Output: graphify-out/graph.json (≥655 nodes; ~5 nodes/note from heading AST)
              graphify-out/GRAPH_REPORT.md
+             graphify-out/cache/stat-index.json + cache/ast/v0.9.3/*.json
 
 3. Verify graph:
-     graph.json contains ≥ 132 nodes (one per vault note)
-     GRAPH_REPORT.md reports 0 import cycles
+     graph.json contains ≥ 132 nodes (one file-root node per vault note)
+     All nodes have _origin: ast; all edges have relation: contains
+     Inter-file edges expected: 0 (wikilinks not resolved by Graphify)
+     GRAPH_REPORT.md: "Surprising connections: None detected" is expected/normal
 
 4. Start graphify-mcp (optional, for MCP-based retrieval):
      graphify-mcp --graph knowledge-vault/graphify-out/graph.json
      (or autoStart in .mcp.json; currently autoStart: false)
 ```
 
-### Retrieval (per-engagement, per-query)
+### Retrieval (per-engagement, per-query — revised per Phase 1A)
 
 ```
 1. Knowledge Agent receives need(query, tenant_id) from Engagement Manager
 2. Calls: retrieve(RetrievalQuery(text=query, tenant_id=tenant_id))
 3. retrieval_adapter:
-     a. query_graph(query)  →  candidate node ids
-     b. get_neighbors(ids)  →  related nodes (domain ↔ framework ↔ KPI edges)
-     c. Direct vault read: parse_frontmatter(note_text) + body excerpt
-     d. tenant-filter: retain only notes where
+     a. Direct vault scan: list all .md files in knowledge-vault/ (excluding graphify-out/)
+        → parse_frontmatter(note_text) for each note
+        → keyword match query vs. title, purpose, when_to_use, name, domains fields
+     b. Graph supplement: query_graph(query) → matching heading-label nodes
+        → source_file lookup → supplement/confirm step-a candidates
+        → get_neighbors(node_id) → H2 sections for intra-note structural context
+        [Note: graph has no cross-file edges; neighbors are intra-file headings only]
+     c. tenant-filter: retain only notes where
           visibility=global OR (visibility=tenant AND tenant=tenant_id)
-     e. rank by: score × note.confidence × recency(last_verified)
-     f. pin evidence: note.id + git_head_commit_hash
-     g. return list[RetrievalResult]
+        [Done via frontmatter fields — graph nodes carry no visibility/tenant data]
+     d. rank by: keyword relevance score × recency(last_verified)
+     e. pin evidence: note.id + git_head_commit_hash
+     f. return list[RetrievalResult]
 4. Knowledge Agent writes to Engagement State:
      KnowledgeReferences: note_id, commit_hash, title, source, score, excerpt
      Evidence: type=external_source, source="{note_id}@{commit_hash}"
@@ -595,7 +684,7 @@ rev-parse HEAD and compare to check if the graph is stale."]
 
 | Operation | Expected | Basis | Classification |
 |---|---|---|---|
-| `graphify update knowledge-vault/` on 132 notes | < 30 s | [Unknown — must measure in S1] | Unknown |
+| `graphify update knowledge-vault/` on 132 notes | < 30 s (observed in Phase 1A) | Phase 1A: run completed in seconds; 655 nodes, 522 edges | Verified — Phase 1A |
 | Cold graph.json read | < 100 ms | 132 nodes; networkx JSON ≈ tens of KB | Inference |
 | `retrieve()` per query (graph + direct read) | < 2 s | 132 nodes; no vector computation; graph traversal is O(neighbors) | Inference |
 | graphify-mcp MCP round-trip | < 500 ms | Local stdio; no network | Inference |
@@ -646,8 +735,9 @@ each is explicitly approved.
 
 | ID | Decision | Options | Impact |
 |---|---|---|---|
-| **D-10** | **[CRITICAL] Verify Graphify markdown behavior** — what does `graphify update knowledge-vault/` produce for `.md` files: node labels, edge types, frontmatter field edges, wikilink edges? | Run `graphify update knowledge-vault/` and read the resulting `graph.json` before committing to retrieval design | Determines whether the ADR-003 integration contract holds; may require simplifying the retrieval model if frontmatter edges are not produced |
-| **D-11** | **[CRITICAL] Vector embedding availability** — does Graphify 0.9.3 produce embeddings for markdown content? | (a) Yes — use for semantic search; (b) No — graph-only retrieval; (c) No but add a separate embedding step (e.g. via a model call) | Determines the "hybrid" in "hybrid retrieval"; embedding step has LLM cost and latency implications |
+| **D-10** | **[RESOLVED — Phase 1A]** Graphify markdown behavior: heading-only AST graph. Node labels = file basename (root) + H1/H2 heading text (section). No frontmatter data. Wikilinks extracted in per-file cache as `references` but dropped from `graph.json` because target paths are resolved directory-relative (not vault-root-relative) — all 157 vault wikilinks are cross-directory and resolve to non-existent paths. Final graph: 0 inter-file edges; all 522 edges are `contains` (intra-file). **Consequence: retrieval_adapter.py must use direct vault file reads as the primary retrieval mechanism; the graph supplements with heading-label matching only.** ADR-003 §7 "hybrid retrieval" requires revision. | Resolved by Phase 1A: `graphify update knowledge-vault/` run + full `graph.json` + per-file AST cache inspection + `get_node` + `get_neighbors` MCP calls | — |
+| **D-11** | **[RESOLVED — Phase 1A]** No vector embeddings produced by `graphify update`. Token cost: 0 input · 0 output. All extraction is pure AST (structural). Semantic extraction requires GEMINI_API_KEY/GOOGLE_API_KEY and a separate `/graphify --update` AI-assistant invocation. **Consequence: ADR-003 §7 "hybrid retrieval" vector leg is unavailable from `graphify update`; D-14/D-17 must account for this. Vector retrieval is deferred to M3-S2 or later as an optional enhancement.** | Resolved by Phase 1A: `GRAPH_REPORT.md` "Token cost: 0"; no embedding files in `graphify-out/`; AST cache `input_tokens: 0, output_tokens: 0` | — |
+| **D-10a** | **[NEW — from D-10 resolution]** Given no cross-file edges in `graph.json`, how does `retrieval_adapter.py` navigate from a query term to related notes (e.g., domain → primary framework → KPIs)? | (a) Direct frontmatter `domains:` field parsing on each note (already possible via `parse_frontmatter`); (b) Implement a vault-side wikilink resolver that reads `[[wikilinks]]` from frontmatter YAML and resolves them vault-root-relative; (c) Embed graph as supplementary structural context only and rely on text-match for cross-note discovery | Option (a) is simplest and uses the frozen API; option (b) adds wikilink resolution the vault validator already does; option (c) is the minimal viable M3 | Requires Phase 2 approval |
 | **D-12** | **Public API of `retrieval_adapter.py`** — exact class names, function signatures, error hierarchy | Proposed in §9; subject to approval | Freeze test pinning; downstream agent integration |
 | **D-13** | **Knowledge Agent implementation form** — pure markdown definition file (per existing agent pattern) or Python-backed? | (a) Markdown only — orchestrates retrieval tool calls; (b) Markdown + Python wrapper | Complexity; testability; ADR-005 contract compliance |
 | **D-14** | **`packages/knowledge.__all__` freeze extension** — add 4 new symbols; update freeze test | Approved by this design (additive extension); freeze test must be updated | M3 cannot ship without updating the freeze test |
@@ -666,9 +756,13 @@ Phase 1 is done when:
 - [x] This document exists and is committed as `docs/implementation/M3-Design.md`
       with `status: PROPOSED`.
 - [x] Task #14 is `in_progress`; no code has been written.
-- [ ] Decisions D-10 and D-11 are resolved (they require running
-      `graphify update knowledge-vault/` and inspecting the output — may be done
-      as a Phase 1.5 discovery step before full Phase 2 approval).
+- [x] Decisions D-10 and D-11 are resolved — Phase 1A evidence gathered:
+      `graphify update knowledge-vault/` run; full `graph.json` + AST cache
+      inspected; MCP `get_node` + `get_neighbors` called. D-10 resolved
+      (heading-only graph; 0 inter-file edges; wikilinks dropped due to
+      directory-relative path resolution). D-11 resolved (no vector embeddings
+      from `graphify update`; semantic extraction requires separate invocation).
+      D-10a opened (cross-note navigation strategy). See §19 for full resolution.
 - [ ] All other decisions (D-12 through D-19) are resolved by the approver.
 - [ ] Approver explicitly approves Phase 2 (implementation).
 
