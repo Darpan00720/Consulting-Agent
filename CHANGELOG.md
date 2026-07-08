@@ -7,6 +7,51 @@ first tagged release.
 
 ## [Unreleased]
 
+### M2 — Knowledge Library (Obsidian vault + validator) — complete
+#### Added
+- **`packages/knowledge`** — a new leaf package: the knowledge-vault frontmatter
+  validator. Pure, read-only, 100% covered (260/260). Public surface (frozen,
+  28 symbols, pinned in `tests/knowledge/test_api_freeze.py`):
+  - **`parse_frontmatter(text)`** — extracts and parses the leading YAML
+    frontmatter block; raises `FrontmatterError` on missing, unterminated,
+    invalid, or non-mapping frontmatter.
+  - **`validate_note(text)`** — validates one note against the typed schema
+    (ADR-003 §5 common header + ADR-004 §3 for `framework` notes); dispatches
+    by `type` across all 13 note types.
+  - **`validate_vault(vault_dir)`** — vault-wide validator: per-note frontmatter
+    via `validate_note`, plus broken `[[wikilinks]]`, circular self-links,
+    duplicate `id`s and aliases, ADR-004 domain coverage, and missing category
+    directories. Collect-all; never fail-fast.
+  - **13 typed frontmatter models** (`CommonHeader` and 12 per-type subclasses)
+    + 5 enums (`NoteType`, `NoteStatus`, `Visibility`, `FrameworkTier`,
+    `DeliverableKind`) + `VaultReport` / `ValidationIssue` / `ValidationSeverity`.
+  - `packages/state`, `packages/persistence`, `packages/replay` **zero-diff**
+    across the whole milestone. Architecture v1.0 frozen and unmodified.
+- **`knowledge-vault/`** — 132 draft vault notes (all `status: draft`, Hybrid D-6
+  authorship policy; reviewer-promotion pending). Breakdown by type:
+  - 15 `domain` notes — ADR-004 §2 consulting domains
+  - 63 `framework` notes — ADR-004 §3 (15 primary + 48 supporting)
+  - 15 `issue_tree` notes — ADR-004 §4 MECE issue trees
+  - 15 `business_problem` notes — ADR-004 §8 business problems
+  - 14 `kpi` notes — ADR-004 §5 canonical KPI catalog (generic definitions
+    only; no benchmark values — reviewer-supplied per D-6)
+  - 10 `industry` notes — ADR-004 §6 industry knowledge model (structure,
+    drivers, engagements; no benchmarks/averages)
+  - validate_vault: **132 notes, is_valid=True, 0 errors, 3 advisory warnings**
+    (deliverables/, prior-cases/, recommendations/ not yet populated)
+- **Docs:** `docs/api/Knowledge.md` (public API reference),
+  `docs/reviews/M2-Completion-Report.md`,
+  `docs/architecture/knowledge-layer.md` (addendum; v1.0 stays frozen).
+- **Delivered across five approval-gated slices** — design (`31e3dbe`), S1
+  validator core (`38bc42e`), S2 vault-wide validator (`f7adf9a`), S3 domain +
+  primary framework notes (`d9b9ac9`), S4A supporting frameworks + issue trees +
+  business problems (`c8f6020`), S4B KPI + industry catalog (`ce6deb8`),
+  S5 finalization (this commit). See `docs/implementation/M2-Design.md` (PROPOSED).
+- **Open decisions deferred to M3/standalone review:** D-3 (plugin cheat-sheet
+  migration), D-4 (ADR-003/004 ratification to `Accepted`), D-5 (draft-gate
+  enforcement), D-8 (per-type schemas for 5 ADR-004-added types), D-9
+  (per-note `schema_version`).
+
 ### M1.9 — Replay Engine (replay & recovery) — complete
 #### Added
 - **`packages/replay`** — a new sibling package that rebuilds engagements from
