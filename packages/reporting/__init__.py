@@ -1,7 +1,16 @@
-"""Reporting capability — state readers and synthesis helpers for the Report Writer."""
+"""Reporting capability — report rendering and structural validation."""
 
 from __future__ import annotations
 
+from reporting.renderer import render_report
+from reporting.validation import (
+    ReportRenderError,
+    ValidationIssue,
+    ValidationReport,
+    check_render_ready,
+    enforce_render_ready,
+    validate_consistency,
+)
 from state.models import EngagementState
 
 
@@ -40,4 +49,13 @@ def engagement_summary(state: EngagementState) -> dict[str, object]:
     }
 
 
-__all__ = ["engagement_summary"]
+__all__ = [
+    "ReportRenderError",
+    "ValidationIssue",
+    "ValidationReport",
+    "check_render_ready",
+    "enforce_render_ready",
+    "engagement_summary",
+    "render_report",
+    "validate_consistency",
+]
