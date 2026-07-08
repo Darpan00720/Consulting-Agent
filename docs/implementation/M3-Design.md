@@ -8,6 +8,7 @@ governing_adr: ADR-003 (Knowledge Architecture), ADR-005 (Agent Specifications);
 evidence_policy: every statement tagged [Verified] / [Inference] / [Unknown]
 phase1a_evidence: incorporated 2026-07-08 — graphify update run against all 132 vault notes; node/edge schema fully verified; D-10 and D-11 resolved
 phase1b_decision: 2026-07-08 — retrieval architecture resolved: Option A (direct vault scan — frontmatter + body); Graphify optional non-blocking supplement; D-10a closed
+phase1c_contract: 2026-07-08 — retrieval contract defined: RetrievalQuery, RetrievalResult, ranking, tie-breaking, filtering order, determinism, error model, perf targets; D-12 resolved
 ---
 
 # M3 — Knowledge Indexing & Retrieval (Design, Phase 1)
@@ -515,28 +516,320 @@ sequenceDiagram
 
 ---
 
-## 9. Public API Proposal
+## 9. Retrieval Contract (Phase 1C — 2026-07-08)
 
-### New symbols in `packages/knowledge.__all__`
+This section defines the full retrieval contract. Every statement is classified
+[Verified], [Inference], or [Unknown]. D-12 is resolved here.
 
-The following symbols are proposed additions to the currently-frozen 28-symbol surface.
-The freeze test (`tests/knowledge/test_api_freeze.py`) must be updated to cover them.
-Exact names subject to approval (D-12).
+> **Note on naming.** The Phase 1C spec uses "RetrievalRequest" as a conceptual
+> label for the input type. This document uses `RetrievalQuery` (already established
+> in §8 and consistent with the type's role as a query predicate, not a request
+> envelope). D-12 is resolved: input type = `RetrievalQuery`.
 
-| Symbol | Type | Purpose |
+---
+
+### 9.1 New symbols in `packages/knowledge.__all__`
+
+Four new symbols extend the frozen 28-symbol surface to 32.
+`test_api_freeze.py` must be updated to pin them (D-14).
+
+[Inference — additive extension; same pattern as M2 additions; no new ADR required]
+
+| Symbol | Kind | Classification |
 |---|---|---|
-| `RetrievalQuery` | frozen dataclass | Input to `retrieve()` — query text + tenant |
-| `RetrievalResult` | frozen dataclass | One retrieved note with provenance |
-| `retrieve` | function | `(RetrievalQuery, ...) → list[RetrievalResult]` |
-| `KnowledgeRetrievalError` | exception | Raised when retrieval fails (not found is NOT an error) |
+| `RetrievalQuery` | frozen dataclass | Inference — name resolves D-12 |
+| `RetrievalResult` | frozen dataclass | Inference — name resolves D-12 |
+| `retrieve` | function | Verified — Roadmap M3 names this file |
+| `KnowledgeRetrievalError` | exception class | Inference — error hierarchy for Phase 2 |
 
-**Proposed new `__all__` count:** 32 (28 + 4).
+**New `__all__` count:** 32 (28 existing + 4 new). [Inference]
 
-**ADR required:** no — additive extension of the package; the freeze test update
-is sufficient. [Inference — consistent with M2 pattern where new symbols were
-added to `__all__` without a new ADR]
+---
 
-### Knowledge Agent definition (markdown agent file)
+### 9.2 `RetrievalQuery` — input type (D-12 resolved)
+
+```python
+_MAX_RESULTS: int = 50   # module-level constant; NOT in __all__
+
+@dataclass(frozen=True)
+class RetrievalQuery:
+    text: str                               # non-empty natural-language query
+    tenant_id: str | None = None            # None → return global-visibility notes only
+    types: frozenset[NoteType] | None = None  # None → all types; subset → pre-filter
+    limit: int = 10                         # max results; capped at _MAX_RESULTS
+```
+
+**Field evidence:**
+
+| Field | Classification | Source |
+|---|---|---|
+| `text: str` | Verified | ADR-005 §3: Knowledge Agent receives a "need(query, …)"; §12 retrieval flow uses `text=query` |
+| `tenant_id: str \| None` | Verified | ADR-005 §3 + KR-003: tenant filtering is mandatory; `None` is the safe default (returns only global notes) |
+| `types: frozenset[NoteType] \| None` | Inference | Callers will need framework-only or KPI-only queries; `NoteType` is already a frozen enum in the API |
+| `limit: int = 10` | Inference | Standard retrieval pattern; 10 is reasonable for an engagement context |
+| `_MAX_RESULTS = 50` | Inference | Guard against accidental full-vault returns; 50 > 132 notes total is unreachable in practice but bounds future growth |
+
+**Validation (enforced inside `retrieve()` — not a dataclass validator):**
+
+- `query.text` empty → `KnowledgeRetrievalError("RetrievalQuery.text must not be empty")`
+  [Inference]
+- `query.limit < 1` → `KnowledgeRetrievalError("RetrievalQuery.limit must be ≥ 1")`
+  [Inference]
+
+---
+
+### 9.3 `RetrievalResult` — output type (D-12 resolved)
+
+```python
+@dataclass(frozen=True)
+class RetrievalResult:
+    note_id: str            # frontmatter id field (e.g., "fw_five_forces")
+    note_path: Path         # relative to vault_dir (e.g., Path("frameworks/porters-five-forces.md"))
+    commit_hash: str        # git HEAD at retrieval time; "unknown" if git unavailable
+    title: str              # frontmatter title field
+    note_type: NoteType     # frontmatter type field
+    source: str             # frontmatter source field (provenance string)
+    score: float            # relevance score in [0.0, 1.0]; see §9.4
+    excerpt: str            # most-relevant body section ≤ 500 chars; "" if body unreadable
+    visibility: Visibility  # frontmatter visibility field
+    tenant: str | None      # frontmatter tenant; None for global notes
+    last_verified: str      # frontmatter last_verified (ISO "YYYY-MM-DD")
+```
+
+**Field evidence:**
+
+| Field | Classification | Source |
+|---|---|---|
+| `note_id` | Verified | ADR-003 §11: "evidence pinned to note id + git commit hash"; frontmatter `id` present on all 132 notes |
+| `note_path` | Verified | ADR-005 §3: Knowledge Agent reads notes; path needed for follow-up reads |
+| `commit_hash` | Verified | ADR-003 §11: "git commit hash" is the pinning mechanism; "unknown" fallback from §14 failure modes |
+| `title` | Verified | ADR-002 §13 KnowledgeReference schema requires title; frontmatter `title` on all 132 notes |
+| `note_type` | Verified | ADR-005 §3: Knowledge Agent must know note type to write typed references; `NoteType` enum in frozen API |
+| `source` | Verified | ADR-003 §10: provenance (`source`) required on every note; present on all 132 notes |
+| `score` | Inference | Ranking output; needed by Knowledge Agent to order references by relevance |
+| `excerpt` | Inference | ADR-002 §13 Knowledge Reference includes content snippet; ≤ 500 chars to bound state size |
+| `visibility` | Verified | KR-003: Knowledge Agent must not surface cross-tenant data; visibility present on all 132 notes |
+| `tenant` | Verified | KR-003: tenant field needed for agent-side re-verification; None for all 132 current notes (all global) |
+| `last_verified` | Verified | Present on all 132 notes (Phase 1C scan); used as tie-breaking signal in §9.5 |
+
+---
+
+### 9.4 Ranking algorithm
+
+**Tokenisation:**
+
+```
+query_tokens = {
+    t.lower()
+    for t in re.split(r'[\s\W]+', query.text)
+    if len(t) >= 2
+}
+```
+
+[Inference — minimum token length 2 avoids matching single-letter stop words; split on
+whitespace + non-word characters handles "M&A", "P&L" correctly]
+
+**Searchable fields and weights:**
+
+| Field | Weight | Present on | Classification |
+|---|---|---|---|
+| `title` | 4.0 | All 132 notes | Verified — always present; title match is strongest signal |
+| `name` | 3.5 | 63 framework notes | Verified — framework display name; often differs from filename |
+| `purpose` | 3.0 | 63 framework notes | Verified — describes what the framework does; rich query surface |
+| `when_to_use` | 2.0 | 63 framework notes | Verified — use-case language; good for scenario queries |
+| `domains` (list → joined) | 1.5 | 63 framework notes | Verified — domain membership; bridges query to framework type |
+| `diagnostic_questions` (list → joined) | 1.5 | 63 framework notes | Verified — question-style queries align well with this field |
+| body text (full) | 1.0 | All 132 notes | Inference — body has additional context; lower weight avoids noise |
+
+**Score formula:**
+
+```
+field_text(note, f) = " ".join(str(v) for v in field_value).lower()
+                      if field_value is not None else ""
+
+hit(note, f, tokens) = 1.0  if any(t in field_text(note, f) for t in tokens)
+                       else  0.0
+
+weight_sum(note)     = Σ weight_f  for fields f present on note
+
+score(note, query)   = Σ (weight_f × hit(note, f, tokens)) / weight_sum(note)
+                       if weight_sum(note) > 0  else  0.0
+```
+
+**Score bounds:** score ∈ [0.0, 1.0] by construction (numerator ≤ denominator). [Inference]
+
+**Zero-match exclusion:** notes where `score == 0.0` are excluded before sorting. [Inference —
+a note with no query token in any field is irrelevant; returning it would require the Knowledge
+Agent to cite it, violating the no-fabrication invariant]
+
+---
+
+### 9.5 Tie-breaking rules
+
+When `score(A) == score(B)`, apply in order:
+
+| Level | Sort key | Direction | Classification | Rationale |
+|---|---|---|---|---|
+| 1 | `last_verified` | DESC | Verified — field on all 132 notes; ISO "YYYY-MM-DD" sorts lexicographically | More recently verified knowledge is more trustworthy |
+| 2 | `note_type` priority | ASC (lower = higher priority) | Inference | Frameworks are the most directly actionable; types with richer field surfaces rank first |
+| 3 | `note_id` | ASC | Inference | Lexicographic sort ensures full determinism |
+
+**Type priority values:**
+
+| NoteType | Priority |
+|---|---|
+| `framework` | 0 |
+| `domain` | 1 |
+| `kpi` | 2 |
+| `industry` | 3 |
+| `issue_tree` | 4 |
+| `business_problem` | 5 |
+
+[Inference — framework notes carry the richest retrieval surface (11 required fields); KPIs and
+industries are reference data; issue trees and business problems are structural aids]
+
+---
+
+### 9.6 Filtering order
+
+Steps execute in this exact sequence. [Inference — order matters for correctness and performance]
+
+```
+1. Glob vault_dir/**/*.md, sorted ascending by path
+   → skip: graphify-out/**, .obsidian/**, _attachments/**, _meta/**
+   [Verified — vault_validator.py already uses this scoping]
+
+2. For each path:
+   a. Read file text
+   b. parse_frontmatter(text) → on ValidationError or ParseError: log warning, skip note
+      [Verified — parse_frontmatter is in the frozen API; it raises on malformed YAML]
+
+3. Type filter (only if query.types is not None):
+   → skip notes where note.note_type ∉ query.types
+   [Inference — pre-filter reduces scoring work; applied before tenant filter for performance]
+
+4. Tenant filter (always; enforces KR-003):
+   → skip notes where note.visibility == Visibility.tenant
+                     AND note.tenant != query.tenant_id
+   [Verified — KR-003; VP3: frontmatter is the only source of visibility/tenant data]
+
+5. Score each remaining note (§9.4)
+   → skip notes where score == 0.0
+
+6. Sort: score DESC → last_verified DESC → type_priority ASC → note_id ASC
+   [Inference — §9.5 tie-breaking]
+
+7. Slice: results[:min(query.limit, _MAX_RESULTS)]
+
+8. For each result note:
+   a. Read body text (re-use already-read text from step 2 if cached)
+   b. Extract excerpt: most-relevant body section ≤ 500 chars
+      (section = text between ## headings that contains a query token;
+       if none found, first 500 chars of body)
+   c. Get commit_hash: git rev-parse HEAD (subprocess); "unknown" on failure
+
+9. Return list[RetrievalResult]
+```
+
+**Body text is read once** (step 2a) and reused in step 8a — no double I/O. [Inference]
+
+---
+
+### 9.7 Determinism guarantees
+
+| Guarantee | Scope | Classification |
+|---|---|---|
+| Same query + same vault state → same result list (identity) | Absolute | Inference — all operations are pure; glob sorted; arithmetic deterministic |
+| Same query + same vault state → same `score` values | Absolute | Inference — deterministic arithmetic |
+| Same query + same vault state → same `note_id` ordering | Absolute | Inference — 3-level tie-breaking fully specified |
+| Same query + different vault HEAD commit → different `commit_hash` | By design | Verified — `commit_hash` is evidence pinning; it MUST vary when vault changes |
+| Same query + vault commit in-flight → stable result list | Not guaranteed | Unknown — no transaction isolation; vault files may change between steps 2 and 8 |
+
+**Note on `commit_hash` non-determinism:** `commit_hash` captures vault state at retrieval time
+for evidence-pinning purposes (ADR-003 §11). Two calls in the same process with the same query
+against the same vault content but different git commits will return different `commit_hash`
+values. This is correct behaviour, not a bug. [Verified — ADR-003 §11]
+
+---
+
+### 9.8 Error model
+
+```python
+class KnowledgeRetrievalError(Exception):
+    """
+    Raised for unexpected retrieval failures.
+    Empty results are NOT an error — retrieve() returns [] in that case.
+    """
+```
+
+**Raises `KnowledgeRetrievalError`:**
+
+| Condition | Message | Classification |
+|---|---|---|
+| `query.text` is empty string | `"RetrievalQuery.text must not be empty"` | Inference |
+| `query.limit < 1` | `"RetrievalQuery.limit must be ≥ 1"` | Inference |
+| `vault_dir` does not exist | `f"vault_dir not found: {vault_dir}"` | Inference |
+
+**Returns `[]` without raising:**
+
+| Condition | Classification |
+|---|---|
+| No notes match the query | Verified — ADR-005: "escalate, never fabricate"; Knowledge Agent handles empty results |
+| All matching notes filtered by tenant | Verified — KR-003 |
+| All matching notes filtered by type | Inference |
+
+**Continues without raising (degrades gracefully):**
+
+| Condition | Behaviour | Classification |
+|---|---|---|
+| Individual note has malformed frontmatter | Skip that note; log warning | Inference |
+| `git rev-parse HEAD` fails | `commit_hash = "unknown"`; result included | Verified — §14 failure modes |
+| `graphify-mcp` not running | Skip graph supplement; proceed with vault scan | Verified — Phase 1B |
+
+---
+
+### 9.9 Performance expectations (Phase 1C — measured baseline)
+
+| Operation | Measured | Target | Classification |
+|---|---|---|---|
+| 132-note full text read (I/O only) | **1.7 ms** | ≤ 10 ms | Verified — Phase 1C measurement |
+| 132-note frontmatter parse (yaml.safe_load) | **69.9 ms** | ≤ 150 ms | Verified — Phase 1C measurement |
+| Scoring + sorting (pure Python, 132 notes) | ~1–5 ms est. | ≤ 20 ms | Inference — O(n) scoring + O(n log n) sort |
+| git rev-parse HEAD (subprocess) | ~10–30 ms est. | ≤ 50 ms | Inference — one subprocess spawn per call |
+| `retrieve()` end-to-end (without Graphify) | ~80–110 ms | ≤ 200 ms | Inference — sum of above with overhead |
+| `retrieve()` end-to-end (with Graphify) | ~300–600 ms est. | ≤ 2 s | Inference — adds MCP round-trip latency |
+| Memory (full vault scan in-process) | ~132 × 1.7 KB ≈ 220 KB | ≤ 5 MB | Verified — note sizes 676–2294 bytes (Phase 1C scan) |
+
+**Test:** `tests/knowledge/test_retrieval_perf.py` — assert `retrieve()` ≤ 200 ms on 132-note
+vault (single golden query; without Graphify supplement). [Inference — consistent with §17]
+
+---
+
+### 9.10 `retrieve()` function signature (D-12 resolved)
+
+```python
+def retrieve(
+    query: RetrievalQuery,
+    *,
+    vault_dir: Path = Path("knowledge-vault"),
+) -> list[RetrievalResult]:
+    """
+    Scan vault_dir, score notes against query, return ranked results.
+
+    Returns [] if no notes match — never raises for empty results.
+    Raises KnowledgeRetrievalError for invalid query or missing vault_dir.
+    graph_path is no longer a parameter: Graphify graph is an optional
+    runtime supplement, not a retrieve() input (Phase 1B decision).
+    """
+```
+
+[Inference — `graph_path` removed from signature: Graphify supplement is internally optional;
+callers should not need to pass a graph path. If MCP is available at call time, the adapter
+uses it; otherwise it skips it transparently.]
+
+---
+
+### 9.11 Knowledge Agent definition (markdown agent file)
 
 Follows the ADR-005 contract template. Location:
 `plugins/ruflo-stratagent/agents/knowledge-agent.md`.
@@ -791,7 +1084,7 @@ each is explicitly approved.
 | **D-10** | **[RESOLVED — Phase 1A]** Graphify markdown behavior: heading-only AST graph. Node labels = file basename (root) + H1/H2 heading text (section). No frontmatter data. Wikilinks extracted in per-file cache as `references` but dropped from `graph.json` because target paths are resolved directory-relative (not vault-root-relative) — all 157 vault wikilinks are cross-directory and resolve to non-existent paths. Final graph: 0 inter-file edges; all 522 edges are `contains` (intra-file). **Consequence: retrieval_adapter.py must use direct vault file reads as the primary retrieval mechanism; the graph supplements with heading-label matching only.** ADR-003 §7 "hybrid retrieval" requires revision. | Resolved by Phase 1A: `graphify update knowledge-vault/` run + full `graph.json` + per-file AST cache inspection + `get_node` + `get_neighbors` MCP calls | — |
 | **D-11** | **[RESOLVED — Phase 1A]** No vector embeddings produced by `graphify update`. Token cost: 0 input · 0 output. All extraction is pure AST (structural). Semantic extraction requires GEMINI_API_KEY/GOOGLE_API_KEY and a separate `/graphify --update` AI-assistant invocation. **Consequence: ADR-003 §7 "hybrid retrieval" vector leg is unavailable from `graphify update`; D-14/D-17 must account for this. Vector retrieval is deferred to M3-S2 or later as an optional enhancement.** | Resolved by Phase 1A: `GRAPH_REPORT.md` "Token cost: 0"; no embedding files in `graphify-out/`; AST cache `input_tokens: 0, output_tokens: 0` | — |
 | **D-10a** | **[RESOLVED — Phase 1B]** Retrieval architecture = **Option A: direct vault scan (frontmatter + body)** as primary; Graphify as optional, non-blocking supplement. Cross-note navigation = frontmatter `domains:` field parse (strip `[[...]]` → vault-root-relative path → read target note). Graphify's heading-label index (`query_graph`) MAY be used if graphify-mcp is running, but retrieval must succeed without it. See §7 "Phase 1B" for full option analysis. | Option A selected: [Verified] rich frontmatter fields (7–19/note) cover all retrieval needs; [Verified] `parse_frontmatter` in frozen API; [Verified] O(132) scan < 1 s; [Verified] tenant filtering via frontmatter visibility/tenant; [Verified] cross-note nav via domains: field; Option B rejected (KR-003 violation); Options C/D dominated by A at 132-note scale | — |
-| **D-12** | **Public API of `retrieval_adapter.py`** — exact class names, function signatures, error hierarchy | Proposed in §9; subject to approval | Freeze test pinning; downstream agent integration |
+| **D-12** | **[RESOLVED — Phase 1C]** Public API of `retrieval_adapter.py`: input type = `RetrievalQuery` (text, tenant_id, types, limit); output type = `RetrievalResult` (note_id, note_path, commit_hash, title, note_type, source, score, excerpt, visibility, tenant, last_verified); function = `retrieve(query, *, vault_dir)`; error = `KnowledgeRetrievalError`. Full contract in §9. New `__all__` count: 32. | Resolved by Phase 1C: §9.1–9.10 in this document; all field choices traced to ADR evidence or marked [Inference] | Freeze test update (D-14) |
 | **D-13** | **Knowledge Agent implementation form** — pure markdown definition file (per existing agent pattern) or Python-backed? | (a) Markdown only — orchestrates retrieval tool calls; (b) Markdown + Python wrapper | Complexity; testability; ADR-005 contract compliance |
 | **D-14** | **`packages/knowledge.__all__` freeze extension** — add 4 new symbols; update freeze test | Approved by this design (additive extension); freeze test must be updated | M3 cannot ship without updating the freeze test |
 | **D-15** | **`graphify-out/` location** — keep inside `knowledge-vault/` (current, established) or move to project root? | (a) Keep inside vault (established by pre-M2 experimentation, excluded by validator) | (b) Move outside (architecturally cleaner; no derived artifacts inside authoritative source) | ADR-003 §1 says "graphify output is not authoritative"; being inside vault is slightly awkward but the validator already excludes it |
@@ -819,7 +1112,8 @@ Phase 1 is done when:
       scan — frontmatter + body) as primary; Graphify optional non-blocking
       supplement; cross-note navigation via frontmatter `domains:` field parse.
       See §7 "Phase 1B" and §19 for full option analysis and decision rationale.
-- [ ] All other decisions (D-12 through D-19) are resolved by the approver.
+- [x] D-12 resolved — Phase 1C: `RetrievalQuery`, `RetrievalResult`, `retrieve()`, `KnowledgeRetrievalError`; full contract in §9; `__all__` count = 32.
+- [ ] All other decisions (D-13 through D-19) are resolved by the approver.
 - [ ] Approver explicitly approves Phase 2 (implementation).
 
 Phase 2 (implementation) will proceed slice-by-slice, each with its own gate.
