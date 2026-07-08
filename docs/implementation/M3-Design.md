@@ -7,6 +7,7 @@ baseline: HEAD 95cf79b; Architecture v1.0 FROZEN; M2 complete (vault + validator
 governing_adr: ADR-003 (Knowledge Architecture), ADR-005 (Agent Specifications); no ADR modified by this milestone
 evidence_policy: every statement tagged [Verified] / [Inference] / [Unknown]
 phase1a_evidence: incorporated 2026-07-08 — graphify update run against all 132 vault notes; node/edge schema fully verified; D-10 and D-11 resolved
+phase1b_decision: 2026-07-08 — retrieval architecture resolved: Option A (direct vault scan — frontmatter + body); Graphify optional non-blocking supplement; D-10a closed
 ---
 
 # M3 — Knowledge Indexing & Retrieval (Design, Phase 1)
@@ -360,13 +361,64 @@ by Phase 1A evidence:**
 
 **Revised retrieval model for `retrieval_adapter.py`:**
 
-| Role | Mechanism | Rationale |
-|---|---|---|
-| Primary retrieval | Direct vault scan: read all `.md` files, `parse_frontmatter`, match query against `title`, `purpose`, `when_to_use`, `name`, `domains` fields | Only mechanism with semantic knowledge of cross-note relationships |
-| Structural supplement | `query_graph(query)` → match on heading labels (`norm_label`) | Finds notes by domain/framework heading name; supplements text-match |
-| Section targeting | `get_neighbors(node_id)` → H2 section labels for a matched note | Identifies which section of a note is most relevant to the query |
-| Tenant filter | Frontmatter `visibility` + `tenant` fields from `parse_frontmatter` | Graph nodes carry no frontmatter data (VP3); must use direct read |
-| Cross-note navigation | Direct frontmatter `domains:` field parse + wikilink text extraction | Graph edges are intra-file only; cross-note links must be followed via frontmatter |
+| Role | Mechanism | Classification | Rationale |
+|---|---|---|---|
+| Primary retrieval | Scan all 132 `.md` files; `parse_frontmatter`; keyword match on `title`, `purpose`, `when_to_use`, `name`, `domains`, `diagnostic_questions` fields | **Required** | [Verified] Only source with type/tenant/purpose/domains data; covers all ADR-005 retrieval requirements |
+| Tenant filter | Frontmatter `visibility` + `tenant` fields (from primary scan) | **Required** | [Verified] Graph nodes carry no frontmatter data (VP3); KR-003 mandates tenant safety |
+| Cross-note navigation | Parse frontmatter `domains:` field → strip `[[...]]` → resolve vault-root-relative path → read target note | **Required** | [Verified D-10a] Graph has 0 inter-file edges; frontmatter `domains:` field provides typed relationships |
+| Body excerpt | Read body text of matched notes; split by `##` to find most relevant section | **Required** | [Verified] Body text provides `excerpt` field for `RetrievalResult`; section split trivial |
+| Graphify supplement | `query_graph(query)` → heading-label match → confirm/supplement step-1 candidates | **Optional** (non-blocking) | [Verified VP5] `autoStart: false`; heading labels are noisy for general queries; retrieval must succeed without it |
+
+### Phase 1B — Retrieval Architecture Decision (2026-07-08)
+
+Four candidate architectures were evaluated against Phase 1A verified evidence.
+
+| # | Architecture | Primary path | Graphify role | D-10a (cross-note nav) |
+|---|---|---|---|---|
+| **A** | **Direct vault scan** (frontmatter + markdown body) | Scan 132 `.md` files; `parse_frontmatter`; match against rich frontmatter fields | Optional supplement for heading-label confirmation and section targeting | Frontmatter `domains:` field direct parse |
+| B | graph.json only | query_graph → heading labels → matched nodes | Required (only data source) | Not possible (0 inter-file edges) |
+| C | graph.json + frontmatter | query_graph pre-filter → file read for matched notes | Required pre-filter | Frontmatter `domains:` field |
+| D | frontmatter + body + Graphify for heading nav | Scan all notes + parse body | Heading structure supplement | Frontmatter `domains:` field |
+
+**Evidence for and against each option:**
+
+**Option A — RECOMMENDED**
+- [Verified] Rich frontmatter retrieval surface: `purpose`, `when_to_use`, `diagnostic_questions`, `domains`, `visibility`, `tenant` across all 132 notes (7–19 fields per note)
+- [Verified] `parse_frontmatter()` is in the frozen API — no new code needed
+- [Verified] 132 notes: O(n) full scan is < 1 s (same order as `validate_vault` runtime)
+- [Verified] Tenant filtering trivially satisfied via frontmatter `visibility` + `tenant` fields
+- [Verified] Cross-note navigation: `domains: ['[[domains/profitability]]']` in frontmatter; strip delimiters → resolve vault-root-relative path (same logic vault_validator uses for wikilink checking)
+- [Inference] No semantic ranking; keyword/field match only — acceptable at 132 notes, may need augmentation at 10,000+
+- Graphify role: OPTIONAL; if graphify-mcp is running, `query_graph(query)` on heading labels can confirm or supplement candidates; if not running, retrieval is unaffected
+
+**Option B — REJECTED**
+- [Verified VP3] Graph nodes carry NO frontmatter data — `visibility`/`tenant` not available
+- [Verified KR-003] ADR-005 §7 tenant filtering invariant cannot be satisfied: retrieval_adapter MUST NOT return cross-tenant notes, but graph alone cannot determine tenant
+- [Verified VP5] 0 inter-file edges — cross-note navigation impossible
+- [Verified] Heading labels have high generic noise: "Diagnostic questions", "Primary framework", "Problem description" appear in every note — not a discriminating index
+- Verdict: disqualified by KR-003 violation
+
+**Option C — SUBOPTIMAL (dominated by A)**
+- [Inference] Graph pre-filter adds latency + MCP dependency without quality gain at 132 notes
+- [Verified] 104 nodes match broad terms like "profitability/framework/cost/revenue/margin" — graph pre-filter is too noisy to narrow candidates meaningfully
+- [Verified] `autoStart: false` for graphify-mcp — cannot be a required step
+- Still requires frontmatter reads for tenant filter → same I/O cost as Option A
+- Verdict: more complex than A with no quality improvement at this corpus size
+
+**Option D — OVER-ENGINEERED (dominated by A)**
+- [Inference] Heading-structure section targeting from graph is replicated by reading body text and splitting at `##` markers — simpler, no MCP dependency
+- [Verified] `autoStart: false` — Graphify is not always available
+- Verdict: three-layer architecture adds failure surface with marginal incremental value
+
+**D-10a resolution (cross-note navigation): Option (a) — frontmatter `domains:` field parse**
+- [Verified] Every framework note has `domains: ['[[domains/profitability]]', ...]`
+- [Verified] Path derivation: strip `[[...]]` → `domains/profitability` → `knowledge-vault/domains/profitability.md`
+- [Verified] vault_validator already resolves these paths for broken-wikilink detection — same logic inverted
+- No new code beyond the path-strip operation; uses existing `parse_frontmatter()` output
+
+**Remaining unknowns after Phase 1B:**
+- [Unknown] query_graph exact matching semantics (keyword, fuzzy, or structural only) — unverified against live vault; not needed for Option A primary path
+- [Unknown] Whether 132-note O(n) scan latency is acceptable under concurrent engagement load — measure in M3 perf tests
 
 ### Data flow (retrieval — revised)
 
@@ -451,10 +503,11 @@ sequenceDiagram
   ) -> list[RetrievalResult]: ...
   ```
 - **Guarantees:**
-  - Pure: same query + same graph → same results (deterministic graph traversal)
+  - Pure: same vault state + same query → same ranked results (deterministic frontmatter scan)
   - Read-only: never modifies vault or graph
-  - Tenant-safe: filters by `tenant_id`; never returns cross-tenant notes
+  - Tenant-safe: filters by `tenant_id` via frontmatter `visibility`/`tenant` fields; never returns cross-tenant notes
   - Provenance: every result carries `note_id` + `commit_hash`
+  - Graphify-independent: succeeds without graphify-mcp running; graph is optional supplement
 - **Does NOT import:** `packages/state` (avoids creating a dependency inversion)
 - **Imports:** `packages/knowledge` (validator), `packages/common` (value objects),
   standard library only; optionally `mcp__graphify__*` when MCP is available,
@@ -673,7 +726,7 @@ rev-parse HEAD and compare to check if the graph is stale."]
 | KR-005 | `retrieval_adapter.py` is pure and read-only (no vault writes, no graph writes) | No IO writes in module; source scan test |
 | KR-006 | The Knowledge Agent is the **only** path by which Engagement State `Knowledge References` are written | ADR-005 §7 ownership matrix; ownership data |
 | KR-007 | `graph.json` is derived and rebuildable; never hand-edited | No editor opens it; `graphify update` is the sole write path |
-| KR-008 | Retrieval is deterministic: same `graph.json` + same query → same ranked results | Pure function contract; determinism test |
+| KR-008 | Retrieval is deterministic: same vault state + same query → same ranked results | Pure function contract on frontmatter scan; determinism test |
 | KR-009 | `packages/knowledge` does not import `packages/state` | Source scan; forbidden-import test |
 | KR-010 | No analyst agent reads vault or graph directly; all firm knowledge access via Knowledge Agent / Knowledge References in state | ADR-005 §7; ownership data; enforcement deferred to M6 (same pattern as state ownership) |
 | KR-011 | Index build is preceded by `validate_vault` gate; a failing vault is never indexed | Pre-index gate; CI gate |
@@ -737,7 +790,7 @@ each is explicitly approved.
 |---|---|---|---|
 | **D-10** | **[RESOLVED — Phase 1A]** Graphify markdown behavior: heading-only AST graph. Node labels = file basename (root) + H1/H2 heading text (section). No frontmatter data. Wikilinks extracted in per-file cache as `references` but dropped from `graph.json` because target paths are resolved directory-relative (not vault-root-relative) — all 157 vault wikilinks are cross-directory and resolve to non-existent paths. Final graph: 0 inter-file edges; all 522 edges are `contains` (intra-file). **Consequence: retrieval_adapter.py must use direct vault file reads as the primary retrieval mechanism; the graph supplements with heading-label matching only.** ADR-003 §7 "hybrid retrieval" requires revision. | Resolved by Phase 1A: `graphify update knowledge-vault/` run + full `graph.json` + per-file AST cache inspection + `get_node` + `get_neighbors` MCP calls | — |
 | **D-11** | **[RESOLVED — Phase 1A]** No vector embeddings produced by `graphify update`. Token cost: 0 input · 0 output. All extraction is pure AST (structural). Semantic extraction requires GEMINI_API_KEY/GOOGLE_API_KEY and a separate `/graphify --update` AI-assistant invocation. **Consequence: ADR-003 §7 "hybrid retrieval" vector leg is unavailable from `graphify update`; D-14/D-17 must account for this. Vector retrieval is deferred to M3-S2 or later as an optional enhancement.** | Resolved by Phase 1A: `GRAPH_REPORT.md` "Token cost: 0"; no embedding files in `graphify-out/`; AST cache `input_tokens: 0, output_tokens: 0` | — |
-| **D-10a** | **[NEW — from D-10 resolution]** Given no cross-file edges in `graph.json`, how does `retrieval_adapter.py` navigate from a query term to related notes (e.g., domain → primary framework → KPIs)? | (a) Direct frontmatter `domains:` field parsing on each note (already possible via `parse_frontmatter`); (b) Implement a vault-side wikilink resolver that reads `[[wikilinks]]` from frontmatter YAML and resolves them vault-root-relative; (c) Embed graph as supplementary structural context only and rely on text-match for cross-note discovery | Option (a) is simplest and uses the frozen API; option (b) adds wikilink resolution the vault validator already does; option (c) is the minimal viable M3 | Requires Phase 2 approval |
+| **D-10a** | **[RESOLVED — Phase 1B]** Retrieval architecture = **Option A: direct vault scan (frontmatter + body)** as primary; Graphify as optional, non-blocking supplement. Cross-note navigation = frontmatter `domains:` field parse (strip `[[...]]` → vault-root-relative path → read target note). Graphify's heading-label index (`query_graph`) MAY be used if graphify-mcp is running, but retrieval must succeed without it. See §7 "Phase 1B" for full option analysis. | Option A selected: [Verified] rich frontmatter fields (7–19/note) cover all retrieval needs; [Verified] `parse_frontmatter` in frozen API; [Verified] O(132) scan < 1 s; [Verified] tenant filtering via frontmatter visibility/tenant; [Verified] cross-note nav via domains: field; Option B rejected (KR-003 violation); Options C/D dominated by A at 132-note scale | — |
 | **D-12** | **Public API of `retrieval_adapter.py`** — exact class names, function signatures, error hierarchy | Proposed in §9; subject to approval | Freeze test pinning; downstream agent integration |
 | **D-13** | **Knowledge Agent implementation form** — pure markdown definition file (per existing agent pattern) or Python-backed? | (a) Markdown only — orchestrates retrieval tool calls; (b) Markdown + Python wrapper | Complexity; testability; ADR-005 contract compliance |
 | **D-14** | **`packages/knowledge.__all__` freeze extension** — add 4 new symbols; update freeze test | Approved by this design (additive extension); freeze test must be updated | M3 cannot ship without updating the freeze test |
@@ -762,7 +815,10 @@ Phase 1 is done when:
       (heading-only graph; 0 inter-file edges; wikilinks dropped due to
       directory-relative path resolution). D-11 resolved (no vector embeddings
       from `graphify update`; semantic extraction requires separate invocation).
-      D-10a opened (cross-note navigation strategy). See §19 for full resolution.
+- [x] D-10a resolved — Phase 1B: retrieval architecture = Option A (direct vault
+      scan — frontmatter + body) as primary; Graphify optional non-blocking
+      supplement; cross-note navigation via frontmatter `domains:` field parse.
+      See §7 "Phase 1B" and §19 for full option analysis and decision rationale.
 - [ ] All other decisions (D-12 through D-19) are resolved by the approver.
 - [ ] Approver explicitly approves Phase 2 (implementation).
 
