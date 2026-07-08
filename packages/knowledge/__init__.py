@@ -33,6 +33,12 @@ from knowledge.frontmatter import (
     Visibility,
 )
 from knowledge.frontmatter_validator import parse_frontmatter, validate_note
+from knowledge.retrieval_adapter import (
+    KnowledgeRetrievalError,
+    RetrievalQuery,
+    RetrievalResult,
+    retrieve,
+)
 from knowledge.vault_validator import (
     EXPECTED_CATEGORY_DIRS,
     REQUIRED_DOMAINS,
@@ -56,6 +62,7 @@ __all__ = [
     "FrontmatterError",
     "IndustryNote",
     "IssueTreeNote",
+    "KnowledgeRetrievalError",
     "KpiNote",
     "LessonNote",
     "NoteStatus",
@@ -63,12 +70,15 @@ __all__ = [
     "PlaybookNote",
     "PriorCaseNote",
     "RecommendationNote",
+    "RetrievalQuery",
+    "RetrievalResult",
     "TemplateNote",
     "ValidationIssue",
     "ValidationSeverity",
     "VaultReport",
     "Visibility",
     "parse_frontmatter",
+    "retrieve",
     "validate_note",
     "validate_vault",
 ]

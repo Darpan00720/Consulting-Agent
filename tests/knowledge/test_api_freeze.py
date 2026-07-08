@@ -18,17 +18,21 @@ from knowledge import (
     CommonHeader,
     FrameworkNote,
     FrontmatterError,
+    KnowledgeRetrievalError,
     NoteStatus,
     NoteType,
+    RetrievalQuery,
+    RetrievalResult,
     ValidationIssue,
     ValidationSeverity,
     VaultReport,
     parse_frontmatter,
+    retrieve,
     validate_note,
     validate_vault,
 )
 
-# Exactly 28 symbols — any addition, removal, or rename fails this set.
+# Exactly 32 symbols — any addition, removal, or rename fails this set. (D-14)
 _FROZEN_ALL: frozenset[str] = frozenset(
     {
         "EXPECTED_CATEGORY_DIRS",
@@ -44,6 +48,7 @@ _FROZEN_ALL: frozenset[str] = frozenset(
         "FrontmatterError",
         "IndustryNote",
         "IssueTreeNote",
+        "KnowledgeRetrievalError",
         "KpiNote",
         "LessonNote",
         "NoteStatus",
@@ -51,12 +56,15 @@ _FROZEN_ALL: frozenset[str] = frozenset(
         "PlaybookNote",
         "PriorCaseNote",
         "RecommendationNote",
+        "RetrievalQuery",
+        "RetrievalResult",
         "TemplateNote",
         "ValidationIssue",
         "ValidationSeverity",
         "VaultReport",
         "Visibility",
         "parse_frontmatter",
+        "retrieve",
         "validate_note",
         "validate_vault",
     }
@@ -71,7 +79,7 @@ def test_public_all_is_frozen() -> None:
 
 
 def test_frozen_all_has_exact_count() -> None:
-    assert len(_FROZEN_ALL) == 28
+    assert len(_FROZEN_ALL) == 32
 
 
 def test_note_type_values_are_frozen() -> None:
@@ -200,3 +208,45 @@ def test_validate_vault_returns_vault_report() -> None:
         assert isinstance(report.is_valid, bool)
         assert isinstance(report.errors, tuple)
         assert isinstance(report.warnings, tuple)
+
+
+# ── M3 D-14: retrieval API surface freeze ─────────────────────────────────────
+
+
+def test_knowledge_retrieval_error_hierarchy_is_frozen() -> None:
+    assert issubclass(KnowledgeRetrievalError, StratAgentError)
+
+
+def test_retrieval_query_fields_are_frozen() -> None:
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(RetrievalQuery)}
+    assert fields == {"text", "tenant_id", "types", "limit"}
+
+
+def test_retrieval_result_fields_are_frozen() -> None:
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(RetrievalResult)}
+    assert fields == {
+        "note_id",
+        "note_path",
+        "commit_hash",
+        "title",
+        "note_type",
+        "source",
+        "score",
+        "excerpt",
+        "visibility",
+        "tenant",
+        "last_verified",
+    }
+
+
+def test_retrieve_signature_is_frozen() -> None:
+    sig = inspect.signature(retrieve)
+    params = list(sig.parameters)
+    assert params == ["query", "vault_dir"]
+    assert sig.parameters["vault_dir"].kind == inspect.Parameter.KEYWORD_ONLY
+    hints = get_type_hints(retrieve)
+    assert hints["query"] is RetrievalQuery
