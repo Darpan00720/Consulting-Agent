@@ -9,6 +9,7 @@ evidence_policy: every statement tagged [Verified] / [Inference] / [Unknown]
 phase1a_evidence: incorporated 2026-07-08 — graphify update run against all 132 vault notes; node/edge schema fully verified; D-10 and D-11 resolved
 phase1b_decision: 2026-07-08 — retrieval architecture resolved: Option A (direct vault scan — frontmatter + body); Graphify optional non-blocking supplement; D-10a closed
 phase1c_contract: 2026-07-08 — retrieval contract defined: RetrievalQuery, RetrievalResult, ranking, tie-breaking, filtering order, determinism, error model, perf targets; D-12 resolved
+phase2_architecture: 2026-07-08 — Knowledge Agent architecture defined: responsibilities, public API, component diagram, sequence diagram, internal pipeline, state interaction, caching, index lifecycle, Graphify integration, failure handling, observability, extension points, design rationale; D-13 resolved
 ---
 
 # M3 — Knowledge Indexing & Retrieval (Design, Phase 1)
@@ -1085,7 +1086,7 @@ each is explicitly approved.
 | **D-11** | **[RESOLVED — Phase 1A]** No vector embeddings produced by `graphify update`. Token cost: 0 input · 0 output. All extraction is pure AST (structural). Semantic extraction requires GEMINI_API_KEY/GOOGLE_API_KEY and a separate `/graphify --update` AI-assistant invocation. **Consequence: ADR-003 §7 "hybrid retrieval" vector leg is unavailable from `graphify update`; D-14/D-17 must account for this. Vector retrieval is deferred to M3-S2 or later as an optional enhancement.** | Resolved by Phase 1A: `GRAPH_REPORT.md` "Token cost: 0"; no embedding files in `graphify-out/`; AST cache `input_tokens: 0, output_tokens: 0` | — |
 | **D-10a** | **[RESOLVED — Phase 1B]** Retrieval architecture = **Option A: direct vault scan (frontmatter + body)** as primary; Graphify as optional, non-blocking supplement. Cross-note navigation = frontmatter `domains:` field parse (strip `[[...]]` → vault-root-relative path → read target note). Graphify's heading-label index (`query_graph`) MAY be used if graphify-mcp is running, but retrieval must succeed without it. See §7 "Phase 1B" for full option analysis. | Option A selected: [Verified] rich frontmatter fields (7–19/note) cover all retrieval needs; [Verified] `parse_frontmatter` in frozen API; [Verified] O(132) scan < 1 s; [Verified] tenant filtering via frontmatter visibility/tenant; [Verified] cross-note nav via domains: field; Option B rejected (KR-003 violation); Options C/D dominated by A at 132-note scale | — |
 | **D-12** | **[RESOLVED — Phase 1C]** Public API of `retrieval_adapter.py`: input type = `RetrievalQuery` (text, tenant_id, types, limit); output type = `RetrievalResult` (note_id, note_path, commit_hash, title, note_type, source, score, excerpt, visibility, tenant, last_verified); function = `retrieve(query, *, vault_dir)`; error = `KnowledgeRetrievalError`. Full contract in §9. New `__all__` count: 32. | Resolved by Phase 1C: §9.1–9.10 in this document; all field choices traced to ADR evidence or marked [Inference] | Freeze test update (D-14) |
-| **D-13** | **Knowledge Agent implementation form** — pure markdown definition file (per existing agent pattern) or Python-backed? | (a) Markdown only — orchestrates retrieval tool calls; (b) Markdown + Python wrapper | Complexity; testability; ADR-005 contract compliance |
+| **D-13** | **[RESOLVED — Phase 2]** Knowledge Agent implementation form = **Option (a): pure markdown**. `knowledge-agent.md` is a markdown instruction set following the same pattern as all 7 existing plugin agents. No Python wrapper. All Python logic lives in `retrieval_adapter.py`. Agent-level responsibilities (query formulation, result interpretation, escalation judgment) are LLM reasoning tasks. ADR-005 §5 contract satisfied by markdown + adapter pair without a wrapper. See §21.1 and §21.15. | Resolved by Phase 2 architecture: all 7 existing agents are pure markdown [Verified]; retrieval_adapter.py already enforces all invariants [Inference]; ADR-005 §5 does not mandate a Python wrapper [Verified] | Markdown file location: `plugins/ruflo-stratagent/agents/knowledge-agent.md` |
 | **D-14** | **`packages/knowledge.__all__` freeze extension** — add 4 new symbols; update freeze test | Approved by this design (additive extension); freeze test must be updated | M3 cannot ship without updating the freeze test |
 | **D-15** | **`graphify-out/` location** — keep inside `knowledge-vault/` (current, established) or move to project root? | (a) Keep inside vault (established by pre-M2 experimentation, excluded by validator) | (b) Move outside (architecturally cleaner; no derived artifacts inside authoritative source) | ADR-003 §1 says "graphify output is not authoritative"; being inside vault is slightly awkward but the validator already excludes it |
 | **D-16** | **Index rebuild trigger** — how is `graphify update` triggered? | (a) Manual — developer runs it before an engagement; (b) `git post-commit` hook on vault commits; (c) Knowledge Agent checks staleness at retrieval time and triggers rebuild | CI complexity; developer experience; stale-index risk |
@@ -1113,10 +1114,684 @@ Phase 1 is done when:
       supplement; cross-note navigation via frontmatter `domains:` field parse.
       See §7 "Phase 1B" and §19 for full option analysis and decision rationale.
 - [x] D-12 resolved — Phase 1C: `RetrievalQuery`, `RetrievalResult`, `retrieve()`, `KnowledgeRetrievalError`; full contract in §9; `__all__` count = 32.
-- [ ] All other decisions (D-13 through D-19) are resolved by the approver.
+- [x] D-13 resolved — Phase 2: `knowledge-agent.md` = pure markdown (Option a); no Python wrapper; full architecture in §21.
+- [ ] All other decisions (D-14 through D-19) are resolved by the approver.
 - [ ] Approver explicitly approves Phase 2 (implementation).
 
 Phase 2 (implementation) will proceed slice-by-slice, each with its own gate.
+
+---
+
+## 21. Knowledge Agent Architecture (Phase 2 — 2026-07-08)
+
+This section is the authoritative Phase 2 design for `knowledge-agent.md`. Every
+statement is classified [Verified], [Inference], or [Unknown]. D-13 is resolved here.
+
+The Phase 1C retrieval contract (§9) is the **approved interface**; Phase 2 builds
+on it without reopening it. No `packages/**` changes in this section.
+
+---
+
+### 21.1 D-13 Resolution — Implementation Form
+
+**Decision: Option (a) — pure markdown agent file.**
+
+`knowledge-agent.md` is a markdown instruction set (LLM behavioral specification)
+following the same pattern as all 7 existing plugin agents
+(`case-classifier.md`, `challenger.md`, `framework-strategist.md`, etc.).
+No Python wrapper is added.
+
+[Verified — all 7 existing agents under `plugins/ruflo-stratagent/agents/` are pure
+markdown files; confirmed by `ls agents/` at Phase 1A baseline]
+
+**What the markdown file specifies:**
+
+1. How to extract a retrieval query from an issue-tree node or explicit need
+2. When to apply a `types` filter (e.g., "find frameworks for…" → `types={framework}`)
+3. How to interpret empty results and when to escalate
+4. How to map each `RetrievalResult` to a `KnowledgeReference` + `Evidence` state write
+5. What "fully sourced" means in the ADR-005 §5 Evidence contract sense
+
+See §21.15 for full design rationale.
+
+---
+
+### 21.2 Responsibilities
+
+Per ADR-005 §3 and ADR-003 §8 [Verified] — adapted to Phase 1A/1B/1C evidence:
+
+| Responsibility | Description | Classification |
+|---|---|---|
+| Sole knowledge reader | The only agent that reads firm knowledge on behalf of an engagement | Verified — ADR-005 §3; ADR-003 §8; ADR-005 §7 invariant |
+| Retrieval | Call `retrieve(RetrievalQuery)` → `list[RetrievalResult]`; adapter handles all I/O, filtering, ranking | Verified — §9.10 contract |
+| Tenant enforcement | Pass `tenant_id` in RetrievalQuery; adapter's KR-003 filter ensures no cross-tenant results reach the agent | Verified — KR-003; §9.6 step 4 |
+| Provenance tagging | Every state write carries `note_id@commit_hash`; no un-sourced item is written | Verified — ADR-003 §11; ADR-005 §5 |
+| Write KnowledgeReferences | One `KnowledgeReference` per `RetrievalResult` (§21.8) | Verified — ADR-002 §13 |
+| Write Evidence | One `Evidence(type=external_source)` per `RetrievalResult` (§21.8) | Verified — ADR-002 §14; ADR-003 §8 |
+| Escalation | If `retrieve()` returns [] → escalate to Manager; never fabricate; never write un-sourced claims | Verified — ADR-005 §3: "escalate… never fabricate" |
+| Web Research (deferred) | ADR-005 §6 permits Web Research as a Knowledge Agent tool; reserved for M3-S2+ when vault returns [] and web escalation is policy-approved | Unknown — not in M3 scope |
+
+**Must NOT:**
+
+| Prohibition | Classification | Source |
+|---|---|---|
+| Read vault or graph directly (bypass adapter) | Verified | ADR-005 §7; KR-010 |
+| Write to vault or graph | Verified | ADR-005 §3; Knowledge Curator is the only vault writer |
+| Write to any state section other than Knowledge References + Evidence Ledger | Verified | ADR-002 ownership matrix (§28): KA owns exactly those two sections |
+| Assert un-sourced claims | Verified | ADR-005 §5 Evidence contract |
+| Return cross-tenant results | Verified | KR-003 (enforced in adapter; agent re-verifies before write) |
+| Fabricate when retrieve() returns [] | Verified | ADR-005 §3 |
+| Trigger `graphify update` | Verified | ADR-003 §8: Graphify is queried, not managed, by the Knowledge Agent |
+
+---
+
+### 21.3 Public API Contract
+
+The Knowledge Agent's "public API" is its dispatch invocation contract (per ADR-005 §5).
+As a markdown agent, this is behavioral, not a function signature.
+
+#### 21.3.1 Inputs (dispatch context)
+
+```
+need: str          # natural language analytical need or issue-tree node text
+                   # e.g. "find frameworks for profitability analysis"
+                   #      "retrieve industry context for retail market entry"
+tenant_id: str | None   # from engagement client context
+                         # None → retrieve global-visibility notes only
+types: list[NoteType] | None = None   # optional; agent infers from need phrasing
+limit: int = 10    # max KnowledgeReferences to write; forwarded to RetrievalQuery
+```
+
+[Inference — fields derived from ADR-005 §3: "analytical need, client, tenant";
+`types` inferred from need phrasing by agent reasoning; not always explicitly passed]
+
+#### 21.3.2 Outputs (written to Engagement State — not returned directly)
+
+Per ADR-002 §13 and §14:
+
+```
+KnowledgeReferences : list[KnowledgeReference]   # one per RetrievalResult
+Evidence Ledger     : list[Evidence]              # one per RetrievalResult; type=external_source
+```
+
+If retrieve() returns [] or raises KnowledgeRetrievalError (after retry):
+
+```
+No KnowledgeReferences or Evidence written.
+Escalation event recorded (no_knowledge or retrieval_error).
+```
+
+[Verified — ADR-005 §3 Post: "provenance-tagged references written; no un-sourced result";
+ADR-002 event: `KnowledgeRetrieved` or escalation signal in routing_log]
+
+#### 21.3.3 Preconditions (per ADR-005 §5)
+
+| Condition | Classification |
+|---|---|
+| An issue tree node or explicit knowledge query exists | Verified — ADR-005 §3 Pre |
+| `client.tenant_id` is known (may be None) | Verified — ADR-005 §3 |
+| `retrieve()` adapter importable (`packages/knowledge` on Python path) | Inference |
+| `vault_dir` is accessible | Inference — §9.8 raises KnowledgeRetrievalError if not |
+
+#### 21.3.4 Postconditions (per ADR-005 §5)
+
+| Condition | Classification |
+|---|---|
+| Every written `KnowledgeReference` has a corresponding `Evidence(type=external_source)` | Verified — ADR-005 §3 Post: "no un-sourced result" |
+| No written `KnowledgeReference` is cross-tenant | Verified — KR-003 (adapter enforces; agent re-verifies) |
+| If retrieve() returned [] → escalation recorded; zero KnowledgeReferences written | Verified — ADR-005 §3 |
+| Every `Evidence.source` = `"{note_id}@{commit_hash}"` | Verified — ADR-003 §11 |
+| `Evidence.validated = false` on all new entries | Verified — ADR-002 §14: only Reviewer sets validated=true |
+
+#### 21.3.5 Failure modes (per ADR-005 §5)
+
+| Mode | Type | Handling |
+|---|---|---|
+| `KnowledgeRetrievalError` raised by adapter | `retrieval_error` | Retry once (idempotent); if retry fails → escalate to Manager |
+| retrieve() returns [] | `no_knowledge` | Escalate to Manager; never fabricate |
+| State write rejected (invariant violation) | `state_write_error` | Do not retry; escalate |
+| `vault_dir` not found | `retrieval_error` | Adapter raises KnowledgeRetrievalError; same path |
+
+#### 21.3.6 Retry rules (per ADR-005 §5)
+
+| Rule | Classification |
+|---|---|
+| `retrieve()` is idempotent: safe to re-call on same query | Inference — pure read function; no side effects |
+| Max 1 retry on `KnowledgeRetrievalError`; then escalate | Inference — consistent with ADR-005 §5 "bounded retries, then escalate" |
+| No retry on empty results (not an error) | Verified — §9.8 error model |
+| No retry on state write failure (not idempotent — avoid duplicate writes) | Inference |
+
+---
+
+### 21.4 Component Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Engagement Manager  (solve-case orchestrator skill)                     │
+│  dispatch: need(query, tenant_id, [types], [limit])                      │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │ agent dispatch (Ruflo subagent)
+                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  knowledge-agent.md      [D-13: pure markdown — no Python wrapper]      │
+│                                                                          │
+│  READS  ──► IssueTree (context / scope shaping)                         │
+│  READS  ──► client.tenant_id (tenant context)                           │
+│  WRITES ──► KnowledgeReferences    (ADR-002 §13)                        │
+│  WRITES ──► Evidence Ledger        (ADR-002 §14, type=external_source)  │
+│                                                                          │
+│  retrieve()=[]        ──► escalate; never write un-sourced references   │
+│  KnowledgeRetrievalError ──► retry once; then escalate                  │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │ Python tool: retrieve(RetrievalQuery)
+                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  packages/knowledge/retrieval_adapter.py         (Phase 1C contract)    │
+│                                                                          │
+│  retrieve(query: RetrievalQuery, *, vault_dir) → list[RetrievalResult]  │
+│                                                                          │
+│  ┌────────────────────────────┐  ┌──────────────────────────────────┐   │
+│  │  PRIMARY (always)          │  │  OPTIONAL SUPPLEMENT             │   │
+│  │  vault scan                │  │  graphify-mcp  MCP               │   │
+│  │  glob → parse_frontmatter  │  │  query_graph(text)               │   │
+│  │  → type / tenant filter    │  │  → heading-label candidates      │   │
+│  │  → score → rank → excerpt  │  │  Skipped if MCP not running      │   │
+│  └─────────────┬──────────────┘  └──────────────────┬───────────────┘   │
+└────────────────┼─────────────────────────────────── ┼────────────────────┘
+                 │ direct I/O                           │ MCP stdio (optional)
+                 ▼                                      ▼
+┌──────────────────────────┐   ┌──────────────────────────────────────────┐
+│  knowledge-vault/        │   │  graphify-out/graph.json                  │
+│  132 .md notes           │   │  655 nodes · 522 edges                    │
+│  (read-only)             │   │  (optional supplement; regenerable)       │
+└──────────────────────────┘   └──────────────────────────────────────────┘
+
+                    ┌────────────────────────────────────────────────────┐
+                    │  Engagement State  (ADR-002)                        │
+                    │  ◄── Knowledge Agent reads:  IssueTree · client    │
+                    │  ──► Knowledge Agent writes: KnowledgeReferences   │
+                    │                              Evidence Ledger        │
+                    └────────────────────────────────────────────────────┘
+```
+
+[Verified — reads/writes per ADR-005 §3; knowledge contracts per ADR-005 §7;
+§9.10 retrieve() signature; Phase 1B Option A decision]
+
+---
+
+### 21.5 Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant EM as Engagement Manager
+    participant KA as knowledge-agent.md
+    participant ES as Engagement State
+    participant RA as retrieval_adapter.py
+    participant VT as knowledge-vault/ (direct I/O)
+    participant GF as graphify-mcp (optional)
+
+    EM->>KA: dispatch — need(query, tenant_id)
+    KA->>ES: read IssueTree → extract scope + context
+    KA->>ES: read client → confirm tenant_id
+
+    KA->>RA: retrieve(RetrievalQuery(text, tenant_id, types, limit))
+
+    RA->>VT: glob knowledge-vault/**/*.md, sorted ascending by path
+    loop for each .md note
+        RA->>VT: read frontmatter + body text
+        RA->>RA: parse_frontmatter → type filter → tenant filter → score
+    end
+
+    opt graphify-mcp is running (autoStart: false)
+        RA->>GF: query_graph(text)
+        GF-->>RA: matching heading nodes (intra-file supplement only)
+    end
+
+    RA->>RA: sort score DESC → last_verified DESC → type_prio ASC → note_id ASC
+    RA->>RA: slice to limit; extract excerpt; git rev-parse HEAD → commit_hash
+    RA-->>KA: list[RetrievalResult]
+
+    alt results is empty
+        KA->>ES: record no_knowledge escalation in routing_log
+        KA-->>EM: escalate — no relevant vault knowledge; do not fabricate
+    else KnowledgeRetrievalError raised
+        KA->>RA: retry once (same query — idempotent)
+        alt retry succeeds
+            RA-->>KA: list[RetrievalResult]
+        else retry fails
+            KA->>ES: record retrieval_error in routing_log
+            KA-->>EM: escalate — retrieval failure after retry
+        end
+    else results non-empty
+        loop for each RetrievalResult r
+            KA->>ES: write KnowledgeReference(id=r.note_id, kind=mapped(r.note_type),\nvault_path=r.note_path, graph_node=None, query=query.text,\nrelevance=r.score, retrieved_at=now())
+            KA->>ES: write Evidence(type=external_source,\nclaim=r.excerpt, source=r.note_id+"@"+r.commit_hash,\nas_of=r.last_verified, confidence=r.score,\nvalidated=false)
+        end
+        KA->>ES: emit KnowledgeRetrieved event
+        KA-->>EM: summary(count=N, top_note_id, top_score)
+    end
+```
+
+[Inference — sequence structure and loop detail; Verified — state read/write fields per
+ADR-002 §13/§14; Verified — Evidence.source format per ADR-003 §11; Verified — escalation
+target per ADR-005 §3]
+
+---
+
+### 21.6 Internal Pipeline
+
+The 7-step pipeline the `knowledge-agent.md` instruction set directs:
+
+```
+Step 1 — Context extraction
+  Read IssueTree from Engagement State.
+  Identify the current analytical need: active issue-tree node being worked,
+  or explicit knowledge query dispatched by Engagement Manager.
+  Extract: real_question, active domain(s), active framework (if already selected).
+
+Step 2 — Query formulation
+  Build RetrievalQuery.text from: need text + key terms from IssueTree context.
+  Infer types filter from need phrasing:
+    "find frameworks for …"    → types = frozenset({NoteType.framework})
+    "get KPIs for …"           → types = frozenset({NoteType.kpi})
+    "industry context for …"   → types = frozenset({NoteType.industry})
+    "domain background …"      → types = frozenset({NoteType.domain})
+    unspecified / broad need   → types = None  (all types returned)
+  Set tenant_id from client context (None for global-only access).
+  Set limit = 10 (default; override if need specifies count).
+
+Step 3 — Retrieve
+  Call: retrieve(RetrievalQuery(text=..., tenant_id=..., types=..., limit=...))
+  On KnowledgeRetrievalError → Step 6b (error path).
+
+Step 4 — Handle empty results
+  If results == []:
+    Record no_knowledge escalation in Engagement State routing_log.
+    Return to Engagement Manager:
+      "No relevant vault knowledge found for: '{query.text}'.
+       Do not fabricate. Recommend: (a) assumption + [ASSUMPTION] label,
+       or (b) web research escalation (out of M3 scope)."
+    STOP — write no KnowledgeReferences or Evidence.
+
+Step 5 — Map results → state writes
+  Guard before each write: assert r.note_id is non-empty.
+  For each result r in results (order: score DESC per ranking):
+    a. Build KnowledgeReference per §21.8 mapping table → write to state.
+    b. Build Evidence per §21.8 mapping table → write to state.
+       Special case: commit_hash == "unknown" → source = "{note_id}@unknown";
+         write Evidence but flag: as_of = r.last_verified (note's declared freshness).
+  Emit KnowledgeRetrieved event.
+
+Step 6a — Return summary
+  Return to Engagement Manager:
+    count        = len(results)
+    top_note     = results[0].note_id + " (" + results[0].title + ")"
+    top_score    = results[0].score
+    tenant_ok    = True  (adapter's KR-003 filter guarantees this)
+
+Step 6b — Error path (retry)
+  On KnowledgeRetrievalError (Step 3 or Step 6b retry):
+    Retry once with identical RetrievalQuery (retrieve() is idempotent).
+    If retry succeeds → Step 5.
+    If retry fails:
+      Record retrieval_error in routing_log.
+      Return to Engagement Manager: "retrieval failure after retry; vault access unavailable."
+      STOP — write no KnowledgeReferences.
+```
+
+[Inference — Step 2 type inference heuristics; Verified — Step 3 KnowledgeRetrievalError
+per §9.8; Verified — Step 4 escalation per ADR-005 §3; Verified — Step 5 commit_hash
+behavior per §9.8 graceful degradation; Verified — Step 6a tenant_ok guarantee via KR-003]
+
+---
+
+### 21.7 Interaction with RetrievalQuery / RetrievalResult
+
+The Knowledge Agent is the **only caller** of `retrieve()` within an engagement.
+[Verified — ADR-005 §7; KR-010]
+
+#### Building `RetrievalQuery`
+
+The Knowledge Agent constructs the query from dispatch context and IssueTree state:
+
+```python
+# Formed by the Knowledge Agent in Step 2:
+query = RetrievalQuery(
+    text      = <need text + IssueTree scope terms>,  # non-empty
+    tenant_id = client.tenant_id,                     # from Engagement State
+    types     = <inferred frozenset | None>,           # Step 2 heuristic
+    limit     = 10,                                   # default; overridable
+)
+```
+
+[Inference — construction logic; Verified — field types per §9.2]
+
+#### Consuming `RetrievalResult` fields
+
+| RetrievalResult field | How the Knowledge Agent uses it | Classification |
+|---|---|---|
+| `note_id` | Primary key of the KnowledgeReference; pinned in Evidence.source | Verified — ADR-003 §11 |
+| `note_path` | Written to KnowledgeReference.vault_path; enables follow-up reads if needed | Inference |
+| `commit_hash` | Appended to Evidence.source: `"{note_id}@{commit_hash}"`; "unknown" is a degraded but valid pin | Verified — ADR-003 §11 |
+| `title` | Informational; included in agent summary to Engagement Manager | Inference |
+| `note_type` | Mapped to KnowledgeReference.kind (see §21.8 mapping table) | Inference |
+| `source` | The note's own provenance field; included as context in Evidence.claim preamble | Inference |
+| `score` | Written to KnowledgeReference.relevance + Evidence.confidence | Inference |
+| `excerpt` | Written as Evidence.claim — the actual cited content; the substantive fact cited | Inference — see §21.15 rationale |
+| `visibility` + `tenant` | Agent re-verifies cross-tenant safety before state write (belt-and-suspenders alongside KR-003) | Inference |
+| `last_verified` | Written to Evidence.as_of — staleness signal for Reviewer | Inference |
+
+---
+
+### 21.8 Interaction with Engagement State
+
+#### State reads (per ADR-005 §3 — Verified)
+
+| State section | ADR-002 ref | Purpose |
+|---|---|---|
+| Issue Tree | §12 | Extract analytical need; scope the query; infer types filter |
+| client | §5 | Get `tenant_id` for RetrievalQuery |
+
+The Knowledge Agent reads **no other** state section. It does not read prior
+KnowledgeReferences, analysis findings, or the assumption ledger.
+[Inference — clean reads; no circular dependency on other agents' outputs]
+
+#### State writes — Knowledge References (ADR-002 §13 — Verified schema)
+
+One `KnowledgeReference` per `RetrievalResult`. ADR-002 §13 field → value mapping:
+
+| ADR-002 §13 field | Value from RetrievalResult | Classification |
+|---|---|---|
+| `id` | `r.note_id` (frontmatter id) | Verified — ADR-003 §11: "note id" is the reference key |
+| `kind` | mapped from `r.note_type` (see table below) | Inference — NoteType → ADR-002 §13 kind enum |
+| `vault_path` | `str(r.note_path)` | Inference — direct Path→str |
+| `graph_node` | `None` (always) | Verified — Phase 1A VP2/VP3: graph node ids are path-derived slugs, not semantic identifiers; populating this field would be misleading |
+| `query` | `query.text` | Inference — traceability: which query produced this reference |
+| `relevance` | `r.score` (float [0.0, 1.0]) | Inference — direct mapping |
+| `retrieved_at` | current timestamp | Inference — standard provenance field |
+
+**NoteType → KnowledgeReference.kind mapping:**
+
+| NoteType | ADR-002 §13 kind | Rationale | Classification |
+|---|---|---|---|
+| `framework` | `"framework"` | Direct match | Verified — ADR-002 §13 enum |
+| `issue_tree` | `"playbook"` | Issue tree notes are structural playbooks for decomposing problems | Inference |
+| `business_problem` | `"prior_case"` | Business problem archetypes most closely resemble prior cases | Inference |
+| `kpi` | `"benchmark"` | KPI notes provide reference benchmark values | Inference |
+| `industry` | `"benchmark"` | Industry notes provide industry-level benchmarks | Inference |
+| `domain` | `"benchmark"` | Domain notes describe business domains; "benchmark" is the closest kind in the ADR-002 §13 enum (which predates M2 NoteTypes) | Inference |
+
+[Inference — all non-"framework" mappings; ADR-002 §13 kind enum was specified before M2
+NoteType enum was finalized; a future ADR may add a "domain" kind to realign]
+
+#### State writes — Evidence Ledger (ADR-002 §14 — Verified schema)
+
+One `Evidence` entry per `RetrievalResult`:
+
+| ADR-002 §14 field | Value | Classification |
+|---|---|---|
+| `id` | generated (sequential int or UUID) | Inference |
+| `claim` | `r.excerpt` — the cited body section (the actual knowledge content asserted) | Inference — see §21.15: excerpt is the substantive fact, not a generic citation string |
+| `type` | `"external_source"` | Verified — ADR-003 §8: "Evidence of type=external_source, each pinned to a vault commit" |
+| `source` | `f"{r.note_id}@{r.commit_hash}"` | Verified — ADR-003 §11: "note id + git commit hash" |
+| `method` | `None` (not computed) | Verified — method is only required for type=computed |
+| `as_of` | `r.last_verified` (ISO "YYYY-MM-DD") | Inference — last_verified is the note's declared freshness; enables Reviewer staleness check |
+| `confidence` | `r.score` (float [0.0, 1.0]) | Inference — retrieval relevance score is the best available confidence proxy |
+| `validated` | `false` | Verified — ADR-002 §14: only Reviewer sets validated=true |
+| `validator` | `None` | Verified |
+
+**ADR-002 §14 invariant check** (Verified):
+`type == "external_source"` → `source` must be non-empty.
+
+`source = "{note_id}@unknown"` when `commit_hash == "unknown"` satisfies this invariant
+(non-empty) while signaling degraded pinning to the Reviewer. [Inference]
+
+#### Event emitted
+
+`KnowledgeRetrieved` — emitted after all KnowledgeReference + Evidence writes complete.
+[Verified — ADR-002 event table: "KnowledgeRetrieved | Knowledge Agent returns refs |
+Knowledge Agent | Knowledge References"]
+
+---
+
+### 21.9 Caching Strategy
+
+#### Within a single `retrieve()` call — adapter-managed
+
+Body text is read once in step 2a (filtering pass) and reused in step 8a (excerpt
+extraction). No double I/O. [Verified — §9.6: "Body text is read once and reused"]
+
+#### Cross-call cache within an engagement — NOT implemented in M3
+
+| Decision | Classification | Rationale |
+|---|---|---|
+| No cross-call frontmatter parse cache | Inference | 132 notes × ≤200 ms × ≤5 KA calls per engagement ≤ 1 s total — acceptable without caching |
+| Cache would require git HEAD invalidation | Inference | Cache key must include vault HEAD commit (KR-008 determinism); invalidation adds complexity |
+| Premature at 132 notes | Inference | Evaluate post-perf-tests when corpus scales beyond ~1,000 notes |
+| Cache key if added later | Inference | `(query.text, tenant_id, types_tuple, git_HEAD_commit)` → `list[RetrievalResult]` |
+
+#### Engagement State as the cross-agent cache (by design — Verified)
+
+KnowledgeReferences written once by the Knowledge Agent are read from state by all
+subsequent agents (Framework Selector, analysts, etc.). State IS the cache. Agents do
+not re-invoke the Knowledge Agent for references already in state.
+
+[Verified — ADR-005 §3: "agents read Knowledge References already in state";
+ADR-005 §7: agents "request it from the Knowledge Agent or read Knowledge References
+it wrote to state"]
+
+[Verified — ADR-005 §1: "agents hold no private memory between invocations"; in-memory
+cross-call cache would violate statelessness and make the system non-resumable]
+
+#### Graphify index cache — not retrieval-time
+
+Graphify's `cache/ast/v0.9.3/` is an index-build artifact maintained by
+`graphify update`. The Knowledge Agent does not interact with it.
+[Verified — Phase 1A VP9]
+
+---
+
+### 21.10 Index Lifecycle — Knowledge Agent Perspective
+
+The Knowledge Agent does **not** manage the Graphify index. That is the pre-engagement
+gate's responsibility (§13). The agent's perspective is read-only:
+
+| Index state | Agent behavior | Classification |
+|---|---|---|
+| Index fresh (`built_at_commit == git HEAD`) | Normal retrieval; Graphify supplement available if graphify-mcp is running | Inference |
+| Index stale (`built_at_commit ≠ git HEAD`) | Adapter proceeds with vault-scan primary; stale graph supplement may miss notes added since last index; `commit_hash` in results is always current HEAD (not the stale index commit) | Inference — §9.6 step 8c |
+| Index absent (`graph.json` missing) | Adapter skips Graphify supplement entirely; primary vault scan unaffected; retrieve() succeeds | Verified — Phase 1B; §9.8 graceful degradation |
+| graphify-mcp not running | Same as "index absent" from agent view; transparent non-blocking fallback | Verified — Phase 1B Option A |
+
+**The agent MUST NOT trigger `graphify update`.** [Verified — ADR-003 §8]
+
+**Staleness signal available but not acted on:** If a result has `commit_hash == "unknown"`,
+git was unavailable at retrieval time — a signal of infrastructure degradation. The
+Evidence.as_of field (`r.last_verified`) still captures note-level freshness independently
+of index or git state. [Inference]
+
+---
+
+### 21.11 Graphify Integration
+
+From the Knowledge Agent's perspective: **Graphify is fully transparent.**
+
+| Aspect | Agent view | Adapter reality | Classification |
+|---|---|---|---|
+| Whether Graphify MCP was used | Agent cannot observe this | Adapter calls `query_graph()` if graphify-mcp is running; skips silently otherwise | Inference |
+| What Graphify provides | Agent sees only `list[RetrievalResult]` | Adapter may use heading-label matches to supplement vault-scan candidates | Inference — Phase 1B |
+| What Graphify CANNOT provide | Agent does not receive cross-note relationships | Phase 1A VP5: 0 inter-file edges; heading graph has no cross-note semantics | Verified — Phase 1A |
+| Direct graphify-mcp access | Agent does NOT call `mcp__graphify__*` | ADR-005 §7: Graphify queried only through Knowledge Agent (i.e., through the adapter) | Verified — ADR-005 §7 |
+
+**Why this transparency matters:** the Knowledge Agent's correctness is independent of
+Graphify availability, version, or index freshness. The adapter absorbs all Graphify
+variability. [Inference — architectural isolation consistent with Phase 1B decision]
+
+**Future Graphify capability:** if Graphify is upgraded to produce vector embeddings
+(GEMINI_API_KEY + separate `/graphify --update`; see D-11), the adapter gains a semantic
+scoring leg. The Knowledge Agent sees higher-quality results with no markdown change.
+[Inference — Phase 1A D-11]
+
+---
+
+### 21.12 Failure Handling
+
+#### Complete failure matrix
+
+| Failure | Detection | Agent action | State outcome | Classification |
+|---|---|---|---|---|
+| `KnowledgeRetrievalError` (1st call) | Exception from retrieve() | Retry once (idempotent) | No state write yet | Inference |
+| `KnowledgeRetrievalError` (after retry) | Exception from retry call | Escalate to Manager | `retrieval_error` in routing_log | Inference |
+| retrieve() returns [] | Empty list | Escalate to Manager | `no_knowledge` in routing_log | Verified — ADR-005 §3 |
+| All results cross-tenant (adapter filtered) | retrieve() returns [] | Same as empty case | `no_knowledge` in routing_log | Verified — KR-003; §9.8 |
+| `commit_hash == "unknown"` | Field value in result | Write Evidence with source=`"{note_id}@unknown"`; include in state | Degraded but valid Evidence entry | Inference — §9.8 graceful degradation |
+| State write rejected (invariant) | Write-time validation error | Do not retry; escalate | Partial state; agent logs which writes succeeded | Inference |
+| `vault_dir` not found | KnowledgeRetrievalError from adapter | Same as error path | `retrieval_error` in routing_log | Inference — §9.8 |
+| graphify-mcp unavailable | Transparent (adapter degrades silently) | No action needed | Normal result (vault-scan is primary) | Verified — Phase 1B; §9.8 |
+
+#### Escalation chain
+
+```
+KnowledgeRetrievalError (after retry)  →  Engagement Manager
+no_knowledge                           →  Engagement Manager
+ └── Manager decides:
+       (a) ask user for more context / clarification
+       (b) proceed with labeled [ASSUMPTION] in place of firm knowledge
+       (c) escalate to Web Research (M3-S2+, out of M3 scope)
+```
+
+[Verified — ADR-005 §3 escalation target: Manager]
+
+**Key guarantee:** the Knowledge Agent NEVER writes a `KnowledgeReference` or `Evidence`
+entry that is not backed by a `RetrievalResult` from `retrieve()`. There is no synthetic
+or fallback reference path. [Inference — structural guarantee from the pipeline]
+
+---
+
+### 21.13 Observability
+
+#### Agent-level — Engagement State events
+
+| Event | When emitted | State target | Classification |
+|---|---|---|---|
+| `KnowledgeRetrieved` | After all KnowledgeReference + Evidence writes succeed | Evidence Ledger | Verified — ADR-002 event table |
+| `EvidenceAdded` (per result) | After each Evidence write | Evidence Ledger | Verified — ADR-002 event: `EvidenceAdded` |
+| Escalation signal | retrieve() returns [] or error after retry | routing_log (Engagement Metadata) | Verified — ADR-002 §3 routing_log |
+
+**The Evidence Ledger is the primary observability artifact.** Every Knowledge Agent
+invocation leaves a fully traceable record: note_id, commit_hash, excerpt, score,
+last_verified. The Reviewer validates this ledger post-analysis. [Verified — ADR-002 §14]
+
+#### Adapter-level — structured Python logging
+
+The adapter emits structured log lines (Python `logging` module) at retrieval time:
+
+| Log entry | Classification |
+|---|---|
+| Query text, tenant_id, types, limit | Inference |
+| Vault scan start + note count + elapsed ms | Inference |
+| Notes skipped (malformed frontmatter) with note path | Inference |
+| Notes dropped by type filter / tenant filter: count | Inference |
+| Notes with score == 0.0: count | Inference |
+| Top-5 results: note_id, score | Inference |
+| graphify-mcp available / unavailable | Inference |
+| commit_hash (git HEAD at retrieval time) | Inference |
+| Total retrieve() elapsed ms | Inference |
+
+[Inference — all adapter log entries; structured JSON log format consistent with M1.7
+perf instrumentation pattern]
+
+#### Ruflo harness hooks
+
+[Unknown] Whether `mcp__claude-flow__hooks_pre-task` / `hooks_post-task` fire
+automatically around Knowledge Agent dispatch. If they do, query + result count +
+elapsed time would be observable in the Ruflo AgentDB without agent-side instrumentation.
+Not modeled in M3 — investigate during Phase 2 implementation.
+
+---
+
+### 21.14 Extension Points
+
+All extensions are forward-looking; none requires changes to the M3 agent markdown
+or Phase 1C retrieval contract unless noted.
+
+| Extension | Trigger condition | What changes | Classification |
+|---|---|---|---|
+| **Semantic ranking leg** | Graphify produces vectors (D-11 lifted: GEMINI_API_KEY + `/graphify --update`) | Adapter adds semantic score to ranking formula; Knowledge Agent markdown unchanged | Inference — Phase 1A D-11 |
+| **Web Research escalation** | retrieve()=[] + engagement policy permits web search | Knowledge Agent calls Web Research tool (ADR-005 §6) before escalating; currently out of M3 scope | Unknown — web tool not in M3 |
+| **Cross-note expansion** | High-relevance result has populated `domains:` field | Adapter optionally fetches domains:-linked notes as second-pass; no agent-level change | Inference |
+| **Query expansion from IssueTree** | IssueTree is fully populated before Knowledge Agent runs | Agent Step 2 adds domain terms from active IssueTree leaf to query text; markdown change only | Inference |
+| **Multi-vault support** | Tenant-specific supplementary vault exists | Agent calls retrieve() twice with different `vault_dir`; merges results dedup by note_id; markdown change + adapter parameter | Inference — retrieve() already parameterized |
+| **BM25 / TF-IDF scoring** | Corpus grows beyond ~1,000 notes | Adapter replaces binary hit scoring with BM25; same retrieve() interface; Knowledge Agent unchanged | Inference — binary hit adequate at 132 notes |
+| **Status-aware ranking** | Notes gain `status: approved` (D-6 hybrid policy evolves) | Adapter adds status_boost weight; markdown unchanged; all 132 current notes are `status: draft` | Inference |
+| **Batch retrieval** | Multiple KA invocations per engagement amortization needed | Add `retrieve_batch(queries: list[RetrievalQuery])` to adapter; amortize vault scan; Knowledge Agent calls it | Inference |
+| **`domain` kind in ADR-002 §13** | NoteType.domain is a distinct concept from "benchmark" | ADR-002 §13 kind enum extended; §21.8 mapping table updated; Knowledge Agent unchanged | Inference — ADR-002 kind enum predates M2 NoteTypes |
+
+---
+
+### 21.15 Design Rationale
+
+**Why pure markdown (D-13 Option a — not Python wrapper):**
+
+1. [Verified] All 7 existing plugin agents are pure markdown. A Python wrapper would
+   be the only exception — an inconsistency with no corresponding benefit.
+2. [Inference] `retrieval_adapter.py` already enforces every invariant a Python wrapper
+   would enforce: KR-003 tenant filter, score bounds, error model, excerpt extraction,
+   commit pinning. A wrapper would create split responsibility: two layers asserting the
+   same guarantee, with no clear owner when they diverge.
+3. [Inference] The Knowledge Agent's core responsibilities (query formulation from
+   IssueTree context, result interpretation, escalation judgment) are LLM reasoning
+   tasks. They cannot be reduced to pure Python functions without losing the judgment
+   capability that makes the agent valuable. The markdown IS the implementation.
+4. [Inference] A Python wrapper would need its own tests, error handling, and type
+   annotations — all of which already exist in the adapter. A wrapper doubles the test
+   surface without improving coverage of the retrieval logic.
+5. [Inference] ADR-005 §5 defines the contract (inputs → state writes → postconditions)
+   without mandating an implementation form. The markdown + adapter pair satisfies the
+   full contract without a wrapper.
+
+**Why the adapter absorbs all Graphify coupling:**
+
+The Knowledge Agent markdown must remain stable across Graphify versions, MCP schema
+changes, and index availability states. Exposing Graphify details to the agent would
+require updating the markdown every time Graphify's tool schema changes. The adapter
+absorbs all Graphify coupling, giving the agent a stable `retrieve()` contract.
+[Inference — architectural isolation; consistent with Phase 1B Option A decision]
+
+**Why `Evidence.claim = r.excerpt` (not a generic citation string):**
+
+ADR-002 §14 defines `Evidence.claim` as "the asserted fact." For external knowledge
+references, the auditable "asserted fact" is the actual text from the note that informs
+the analysis — the excerpt. A generic claim like "retrieved Porter's Five Forces from
+vault" is a citation record, not a fact. The excerpt IS the fact: the specific content
+the agent drew on. This makes the Evidence Ledger Reviewer-verifiable without requiring
+a follow-up vault read. [Inference]
+
+**Why `graph_node = None` in KnowledgeReferences:**
+
+ADR-002 §13 `graph_node` was specified when Graphify was expected to carry frontmatter
+data and semantic cross-note edges. Phase 1A proved: graph node ids are path-derived
+slugs (`frameworks_porters_five_forces`) — not the frontmatter `id`, not stable semantic
+identifiers. Populating `graph_node` with a path-derived slug would create a misleading
+reference that the Reviewer cannot interpret. Setting it to None is accurate and
+consistent with Phase 1A evidence. [Verified — Phase 1A VP2/VP3]
+
+**Why Engagement State is the cross-agent cache:**
+
+Rather than caching `retrieve()` results in process memory for reuse by other agents,
+the architecture uses the Engagement State as the durable cache. This is consistent with
+ADR-005 §1 ("agents are stateless; all shared memory lives in the Engagement State") and
+makes the system resumable after interruption. An in-memory cache would violate
+statelessness: if the process restarts mid-engagement, cached results are lost and cannot
+be replayed from the event log. [Verified — ADR-005 §1; ADR-002 §1]
+
+**Why NoteType → kind mapping is Inference (not Verified):**
+
+ADR-002 §13 `kind` enum (`framework, playbook, company_profile, prior_case, benchmark`)
+was specified before the M2 NoteType enum was finalized. The mapping `domain → benchmark`
+in particular is a best-fit approximation. A future ADR should extend the `kind` enum to
+include `domain` (or replace the enum with a string). This is flagged as Inference rather
+than Verified to flag the imprecision. [Inference]
 
 ---
 
