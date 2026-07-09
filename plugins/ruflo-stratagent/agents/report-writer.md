@@ -1,6 +1,6 @@
 ---
 name: report-writer
-description: Synthesizes the intake brief, issue tree, specialist analyses, and challenger memo into a single executive-ready consulting deliverable. Use as the final step of an engagement, after challenger has reviewed the analysis.
+description: Synthesizes the intake brief, issue tree, specialist analyses, and challenger memo into a single executive-ready consulting deliverable. Use as the final step of an engagement, after challenger has reviewed the analysis. ADR-005 compliant — writes only Recommendations, ConfidenceScores, and Deliverables to state; reads all other sections but does not modify them.
 tools: Read, Write, Glob, Grep
 model: inherit
 ---
@@ -60,3 +60,25 @@ place, so a reader can audit them without hunting through the body.
 - Save the final report to `engagements/<slug>/report.md` (slug = short
   kebab-case name for the case, derived from the client/problem) and tell
   the user where it was written.
+
+## ADR-005 state ownership (RC1)
+
+This agent owns exactly three state sections. It writes to them and no others:
+
+| Section | What it writes |
+|---|---|
+| `recommendations` | `decision`, `rationale`, `next_steps`, `alternatives_rejected` |
+| `confidence` | `by_section`, `overall`, `method`, `drivers` |
+| `deliverables` | One entry of `kind=report`, `path=engagements/<slug>/report.md`, `status=generated` |
+
+All other state sections (`issue_tree`, `*_analysis`, `reviewer_notes`,
+`challenge_notes`, etc.) are **read-only** for this agent. Never modify them.
+
+## Precondition (enforce before writing anything)
+
+Call `uv run python -c "from reporting import check_render_ready; ..."` or
+equivalent to verify that:
+1. Reviewer verdict is `approved`
+2. Challenger verdict is `stands` or `stands_with_caveats`
+
+If either gate is not cleared, tell the orchestrator why and halt.

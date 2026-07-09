@@ -31,52 +31,95 @@ Dispatch the `case-classifier` subagent with the raw case prompt. Save its
 output as `engagements/<slug>/01-intake.md`.
 
 **If `case-classifier` flags critical unknowns that are genuinely
-load-bearing** (the case can't be meaningfully analyzed without them), ask
-the user directly using clarifying questions before proceeding — don't burn
-a full specialist dispatch cycle on invented numbers. If the case is
-interview-style and clearly expects reasonable assumptions instead (common
-in practice-case mode), proceed with the classifier's stated assumptions
-instead of stopping to ask.
+load-bearing** (the case can't be meaningfully analyzed without them),
+dispatch `information-gap` to surface and resolve them (ask vs. assume
+decision for each), then ask the user directly for any that cannot be safely
+assumed. If the case is interview-style and clearly expects reasonable
+assumptions, proceed with the classifier's stated assumptions instead of
+stopping to ask. Save information-gap output as `engagements/<slug>/01b-gaps.md`.
 
-## Phase 2 — frame
+## Phase 2 — plan
 
-Dispatch the `framework-strategist` subagent with the intake brief. Save its
-output as `engagements/<slug>/02-framework.md`. This gives you the issue
-tree and the specialist dispatch plan.
+Dispatch `planner` with the intake brief and gap-resolution output. It
+produces an ordered execution plan with parallel groups and dependency chain.
+Save as `engagements/<slug>/02-plan.md`.
+
+## Phase 3 — frame
+
+Dispatch the following in parallel (they are independent):
+
+- `framework-selector` — retrieves and selects frameworks from the vault
+- `issue-tree-generator` — builds the MECE issue tree (validates MECE before
+  writing; re-runs if violations found, up to 2 times)
+
+Save outputs as `engagements/<slug>/03-framework.md` and
+`engagements/<slug>/03-issue-tree.md`.
 
 Tell the user in one or two sentences what framework you're applying and
 why, before moving on — this is a natural checkpoint for them to redirect
 if the framing looks wrong.
 
-## Phase 3 — analyze
+## Phase 4 — knowledge retrieval
 
-Dispatch the specialists named in the framework-strategist's plan
-(`financial-analyst`, `market-analyst`, `operations-analyst` — only the ones
-actually activated). Run independent, non-blocking specialists in parallel
-in a single batch of Agent calls; run dependent ones sequentially per the
-plan's sequencing section. Give each specialist exactly the question(s) it
-owns plus the relevant facts/assumptions — not the entire case dump.
+Dispatch `knowledge-agent` with the case real_question and the selected
+frameworks. It retrieves curated vault references. Save its output as
+`engagements/<slug>/04-knowledge.md`.
 
-Save each specialist's output as `engagements/<slug>/03-<specialist>.md`.
+## Phase 5 — analyze
 
-## Phase 4 — challenge
+Dispatch the analysts named in the plan's dispatch list. Per the M4/M5
+architecture:
 
-Dispatch the `challenger` subagent with the intake brief, issue tree, and
-all specialist outputs together. Save its output as
-`engagements/<slug>/04-challenge.md`.
+- Eligible analysts (from M5): `financial-analyst`, `market-analyst`,
+  `operations-analyst`, `strategy-analyst`, `risk-analyst`
+- Run independent analysts in parallel; run dependent ones (e.g., `risk-analyst`
+  after at least one other analyst) sequentially per the plan.
+- Each analyst gets: its assigned question(s) + relevant facts/assumptions
+  from intake + vault references from Phase 4 — not the entire case dump.
+- `risk-analyst` runs after at least one other analyst has completed findings
+  (risk depends on findings from other sections).
 
-If the verdict is **needs rework**: re-dispatch the specific specialist(s)
-implicated, with the challenger's finding as added context, before moving
-to synthesis. Don't proceed to a final report on analysis the challenger
-rejected.
+Save each specialist's output as `engagements/<slug>/05-<analyst>.md`.
 
-## Phase 5 — synthesize
+## Phase 6 — review
+
+Dispatch `reviewer` with the intake brief, issue tree, and all analyst
+outputs. It runs 5 checks (MECE, evidence, consistency, calibration,
+gap_closure) and produces a verdict: `approved` or `needs_rework`.
+
+If `needs_rework`: re-dispatch the specific analyst(s) implicated with the
+reviewer's issues as added context. Then re-run reviewer. Maximum two
+rework cycles; if reviewer still finds issues, escalate to the user.
+
+Save as `engagements/<slug>/06-review.md`.
+
+## Phase 7 — challenge
+
+Dispatch `challenger` with the intake brief, issue tree, all analyst
+outputs, and the reviewer's approval. It runs 6 stress tests and produces
+a verdict: `stands`, `stands_with_caveats`, or `needs_rework`.
+
+If `needs_rework`: re-dispatch the specific analyst(s) implicated with the
+challenger's finding as added context, re-run reviewer (if needed), then
+re-run challenger. Don't proceed to a final report on analysis the
+challenger rejected.
+
+Save as `engagements/<slug>/07-challenge.md`.
+
+## Phase 8 — synthesize
 
 Dispatch the `report-writer` subagent with the intake brief, framework,
-all (possibly revised) specialist outputs, and the challenge memo. It will
-write `engagements/<slug>/report.md` directly.
+issue tree, all (possibly revised) analyst outputs, the reviewer memo, and
+the challenge memo. It will write `engagements/<slug>/report.md` directly,
+and verify both governance gates are cleared before rendering.
 
-## Phase 6 — close out
+## Phase 9 — knowledge write-back (optional but recommended)
+
+If the engagement produced durable, generalizable insights:
+Dispatch `knowledge-curator` to extract and write up to three vault notes.
+Save summary as `engagements/<slug>/09-knowledge-writeback.md`.
+
+## Phase 10 — close out
 
 Tell the user, briefly:
 - The bottom-line recommendation (one sentence)

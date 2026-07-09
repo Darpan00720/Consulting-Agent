@@ -1,6 +1,6 @@
 [project]
 name = "stratagent"
-version = "0.0.0"
+version = "0.1.0-rc1"
 description = "StratAgent — AI management-consulting platform (implementation)"
 requires-python = ">=3.12"
 dependencies = [

@@ -5,6 +5,75 @@ All notable changes to StratAgent. Format based on
 changes are grouped by implementation milestone under **[Unreleased]** until the
 first tagged release.
 
+## [0.1.0-rc1] — 2026-07-09
+
+### M9 — Production Readiness — complete
+#### Added
+- **`knowledge-curator.md`** (new agent) — post-engagement vault write-back:
+  extracts up to 3 durable, generalizable insights from a completed engagement
+  and writes them as `status: draft` notes to `knowledge-vault/`. ADR-005
+  compliant (writes only to vault, never to state or engagements/).
+- **`docs/guides/QUICKSTART.md`** — 5-minute setup guide.
+- **`docs/guides/USER_GUIDE.md`** — complete 10-phase workflow documentation.
+- **`docs/reviews/RC1-Release-Notes.md`** — release notes for 0.1.0-rc1.
+- **`engagements/acme-profitability-demo/`** — demo engagement artifacts for a
+  profitability case (intake, report).
+
+#### Updated
+- **`report-writer.md`** — ADR-005 compliance section: documents exactly which
+  state sections this agent owns (recommendations, confidence, deliverables).
+- **`solve-case/SKILL.md`** — full 10-phase lifecycle including all M4-M6 agents
+  (information-gap, planner, framework-selector, issue-tree-generator,
+  strategy-analyst, risk-analyst, reviewer, challenger, knowledge-curator).
+- **`pyproject.toml`** — version bumped to `0.1.0-rc1`.
+
+### M8 — Evaluation & Validation — complete
+#### Added
+- **`tests/fixtures/golden_state.py`** — `make_golden_profitability_state()`:
+  fully-populated, governance-cleared EngagementState for integration tests.
+  7 issue-tree nodes, 3 evidence records, 1 load-bearing assumption with
+  breakeven, 2 analysis blocks, reviewer approved, challenger stands_with_caveats.
+- **`tests/integration/test_engagement_lifecycle.py`** (94 tests) — full state
+  machine, rework loops, forbidden shortcuts, terminal state guard, governance
+  gate preconditions, golden-state assertions.
+- **`tests/integration/test_report_generation.py`** (38 tests) — all 13 section
+  headers, metadata, evidence/assumption citations, assumption labeling,
+  recommendation body, challenger section, footer, graceful empty-section handling.
+- **`tests/validation/test_structural_validation.py`** (30 tests) — all 4
+  check_render_ready rules, enforce_render_ready, consistency validation,
+  five-section coverage, golden state passes all validators.
+- **`tests/perf/test_m7_bench.py`** — M7 performance baselines:
+  `render_report` cold ~82µs, warm ~22µs; `check_render_ready` ~3µs.
+
+### M7 — Report Generation — complete
+#### Added
+- **`packages/reporting/renderer.py`** — `render_report(state) → str`, pure
+  function, deterministic, 14 sections. Evidence-backed findings cited inline;
+  assumption-only findings labeled `[ASSUMPTION: ...]`; footer includes gate
+  verdicts and UTC timestamp.
+- **`packages/reporting/validation.py`** — `check_render_ready(state)` (4 rules:
+  REVIEWER_GATE_NOT_RUN/APPROVED, CHALLENGER_GATE_NOT_RUN/CLEARED,
+  UNEVIDENCED_FINDING, ASSUMPTION_NO_BREAKEVEN), `enforce_render_ready(state)`,
+  `validate_consistency(state)` (INCOMPLETE_ANALYSIS_BLOCK).
+- **`packages/reporting/__init__.py`** — 8-symbol public API: `render_report`,
+  `check_render_ready`, `enforce_render_ready`, `validate_consistency`,
+  `engagement_summary`, `ReportRenderError`, `ValidationIssue`, `ValidationReport`.
+
+### M4–M6 — Consulting Intelligence — complete
+#### Added
+- **M4 — Planning:** `mece_validator.py`, `preconditions.py` (4 gate-check
+  functions), 4 new agent files (information-gap, planner, framework-selector,
+  issue-tree-generator). 37 new tests.
+- **M5 — Analysis:** `analysis/contracts.py` (validate_analysis_block, 4 rules,
+  ANALYST_SECTION_OWNERS), 2 new agent files (strategy-analyst, risk-analyst).
+  16 new tests.
+- **M6 — Governance:** `governance/gates.py` (6 gate functions), `transitions.py`
+  (full ADR-002 state machine, 3 rework loops), 2 new/updated agent files
+  (reviewer, challenger updated to ADR-005). 50 new tests.
+
+### Prior milestones (M1–M3)
+See full history in entries below (preserved from [Unreleased]).
+
 ## [Unreleased]
 
 ### M2 — Knowledge Library (Obsidian vault + validator) — complete
