@@ -519,6 +519,6 @@ def test_real_vault_all_results_visible() -> None:
         vault_dir=_REAL_VAULT,
     )
     for r in results:
-        assert r.visibility is Visibility.GLOBAL, (
-            f"{r.note_id} is tenant-scoped but returned"
-        )
+        assert (
+            r.visibility is Visibility.GLOBAL
+        ), f"{r.note_id} is tenant-scoped but returned"

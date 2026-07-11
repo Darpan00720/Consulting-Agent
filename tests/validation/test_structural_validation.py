@@ -467,9 +467,9 @@ def test_golden_state_all_evidence_cited() -> None:
         for f in block.findings:
             cited_refs.update(f.evidence_refs)
     # Every cited ref should correspond to a known evidence record
-    assert cited_refs.issubset(all_evidence_ids), (
-        f"Uncited evidence refs: {cited_refs - all_evidence_ids}"
-    )
+    assert cited_refs.issubset(
+        all_evidence_ids
+    ), f"Uncited evidence refs: {cited_refs - all_evidence_ids}"
 
 
 def test_golden_state_evidence_type_valid() -> None:
@@ -483,6 +483,4 @@ def test_golden_state_no_load_bearing_assumption_without_breakeven() -> None:
     state = make_golden_profitability_state()
     for a in state.assumptions:
         if a.load_bearing:
-            assert a.breakeven, (
-                f"Load-bearing assumption `{a.id[:8]}` has no breakeven"
-            )
+            assert a.breakeven, f"Load-bearing assumption `{a.id[:8]}` has no breakeven"

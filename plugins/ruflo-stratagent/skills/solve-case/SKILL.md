@@ -14,10 +14,13 @@ remembers prior turns.
 
 ## Phase 0 — setup
 
-Skim this plugin's `README.md` and the framework knowledge base under
-`knowledge/frameworks/` (resolve via `${CLAUDE_PLUGIN_ROOT}`, or
-`reference/frameworks/` in local dev) so you know the case archetypes and
-design principles. Create a short kebab-case slug for this engagement from
+Skim this plugin's `README.md` so you know the case archetypes and design
+principles. Frameworks live in the single authoritative source — the governed
+knowledge vault at `knowledge-vault/frameworks/` (ADR-003/004), retrieved by
+the Knowledge Agent / `knowledge.retrieve(...)`; the deprecated plugin
+`knowledge/frameworks/` cheat sheets are now redirect stubs (see their
+`_MIGRATION.md` for the archetype → vault index). Create a short kebab-case
+slug for this engagement from
 the client/problem (e.g. `regional-grocery-margin`) and create
 `engagements/<slug>/` in the current working directory for this run's
 artifacts.
@@ -106,12 +109,35 @@ challenger rejected.
 
 Save as `engagements/<slug>/07-challenge.md`.
 
-## Phase 8 — synthesize
+## Phase 8 — synthesize (with mandatory live validation gate)
 
-Dispatch the `report-writer` subagent with the intake brief, framework,
-issue tree, all (possibly revised) analyst outputs, the reviewer memo, and
-the challenge memo. It will write `engagements/<slug>/report.md` directly,
-and verify both governance gates are cleared before rendering.
+Two steps, in order:
+
+**8a — Emit `state.json`, then run the deterministic gate.** Before writing the
+report, serialize the engagement into `engagements/<slug>/state.json`
+conforming to the `EngagementState` schema (metadata, problem, classification,
+issue_tree, the analysis blocks, evidence, assumptions with breakevens,
+`reviewer_notes` with verdict, `challenge_notes` with verdict). Then run the
+**blocking** gate:
+
+```
+uv run python scripts/validate_engagement.py <slug>
+```
+
+This runs `enforce_render_ready` + `validate_consistency` (the deterministic
+anti-hallucination layer, ADR-006). **If it exits non-zero, STOP** — do not
+produce a report. Read the emitted diagnostics, route the named issue back to
+the responsible agent (e.g. an unevidenced finding → the owning analyst; a
+missing gate verdict → Reviewer/Challenger), fix `state.json` at its source,
+and re-run the gate. No report may bypass this gate.
+
+**8b — Synthesize the report.** Only once the gate passes, dispatch the
+`report-writer` subagent with the intake brief, framework, issue tree, all
+(possibly revised) analyst outputs, the reviewer memo, and the challenge memo.
+It writes `engagements/<slug>/report.md` (or, if its `Write` is sandboxed,
+returns the content for the orchestrator to persist). The gate — not the
+report-writer's own judgement — is the authority that both governance gates
+cleared.
 
 ## Phase 9 — knowledge write-back (optional but recommended)
 
@@ -129,23 +155,69 @@ Tell the user, briefly:
 Do not paste the entire report back into the chat unless the user asks —
 point them to the file and summarize.
 
+## Telemetry — operational observability (do this alongside every phase)
+
+Instrumentation only; it changes no consulting logic. It makes every engagement
+a complete, replayable trace (see `docs/observability/`). Telemetry is
+operational — keep it **separate** from the ADR-002 domain events; correlate by
+`engagement_id`.
+
+**After each subagent returns** (any phase: classify, gap, plan, framing,
+issue-tree, knowledge, the analysts, reviewer, challenger, report-writer,
+knowledge-curator), record one span:
+
+```
+uv run python scripts/record_telemetry.py \
+  --engagement <engagement_id> --agent <agent-name> --phase <phase> \
+  --status finished --duration-ms <elapsed> \
+  [--confidence <c-from-agent-output>] \
+  [--frameworks <ids-from-framework-selector>] [--tokens <n-if-known>] \
+  [--meta verdict=<approved|needs_rework|stands|stands_with_caveats>]
+```
+
+- `--phase` is one of: `classify gap_analysis planning framing issue_tree
+  knowledge analysis review challenge validation_gate reporting
+  knowledge_writeback`.
+- Capture `--confidence` and `--frameworks` from what the agent already reported
+  in its output (do **not** modify the agent to produce them).
+- If a subagent errors, record `--status failed`. On a rework loop, record the
+  re-run analyst with `--status reworked`.
+- **Validation gate (Phase 8a):** the gate emits its own event via
+  `orchestration.instrument_gate(tracer, state)` when driven from Python; if you
+  ran the gate through the CLI, record a `--phase validation_gate` span with
+  `--validation-status passed|blocked`.
+
+At **close-out**, print the engagement's analytics:
+
+```
+uv run python scripts/engagement_telemetry.py --engagement <engagement_id>
+```
+
+If telemetry tooling is unavailable, skip it silently — it must never block or
+alter the engagement.
+
 ## Operating rules
 
-- **Always run the challenger phase.** It is not optional and not only on
-  request — skipping it is the most common way this pipeline produces
-  consulting-flavored fluff instead of a tested recommendation.
+- **Governance gates are mandatory in every mode (ADR-002 §Quality Gates,
+  ADR-006).** Both the `reviewer` (analysis gate) and the `challenger`
+  (recommendation gate) run on **every** engagement — full or lightweight.
+  ADR-002 records quality gates precisely to *block skipping*; a report may
+  not be produced on analysis that has not passed both. The Reviewer's five
+  checks (MECE, evidence, consistency, calibration, gap-closure) are cheap
+  relative to the analysts and are what catch cross-analyst inconsistency
+  before it reaches the Challenger.
 - **Preserve fact/assumption labeling end to end.** If a specialist tags
   something `[ASSUMPTION]`, that tag must still be visible in the final
   report, not smoothed away during synthesis.
+- **Run the live validation gate before delivering the report (Phase 8).**
+  No report may bypass deterministic validation — see Phase 8.
 - **Keep specialist dispatches scoped.** Each subagent should get its
   assigned question and relevant facts, not the full case history — this
-  keeps their answers tight and keeps context usage reasonable across a
-  6-phase pipeline.
-- **It's fine to run a lightweight version for simple cases.** A
-  straightforward case interview question may only need
-  `case-classifier` → `framework-strategist` → one specialist →
-  `challenger` → `report-writer`. Don't force all three analysts onto every
-  case.
+  keeps their answers tight and keeps context usage reasonable.
+- **"Lightweight" means fewer *analysts*, never fewer *gates*.** A
+  straightforward case may only need `case-classifier` → `framework-selector`
+  → one or two specialists → `reviewer` → `challenger` → `report-writer`.
+  Drop analysts the case doesn't need; never drop the Reviewer or Challenger.
 
 ## Integration with Ruflo (optional, auto-detected)
 

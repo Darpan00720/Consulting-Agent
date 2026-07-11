@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: "StratAgent: An AI Management-Consulting Platform"
+message: "If you use StratAgent in your research, please cite it."
+type: software
+authors:
+  - family-names: Darpan
+    email: darpan20071992@gmail.com
+version: 0.1.0-rc2
+date-released: "2026-07-10"
+license: MIT
+abstract: >-
+  StratAgent is an AI management-consulting platform, packaged as a Claude Code
+  plugin built on the Ruflo harness. It runs a full, governed consulting
+  engagement on a business problem — classify, scope, frame, analyze, review,
+  challenge, validate, and report — enforcing evidence traceability and a
+  mandatory Reviewer and Challenger governance pass before any report is
+  produced. Independent evaluation found its governance layer measurably catches
+  overconfidence and blind spots relative to a single-pass baseline.
+keywords:
+  - management-consulting
+  - multi-agent-systems
+  - llm-agents
+  - governance
+  - ai-evaluation
+  - claude-code

@@ -38,9 +38,7 @@ class TransitionError(StratAgentError):
 
 _L = LifecycleStatus
 
-_TERMINAL: frozenset[LifecycleStatus] = frozenset(
-    {_L.COMPLETED, _L.FAILED, _L.ABORTED}
-)
+_TERMINAL: frozenset[LifecycleStatus] = frozenset({_L.COMPLETED, _L.FAILED, _L.ABORTED})
 
 _ALLOWED: frozenset[tuple[LifecycleStatus, LifecycleStatus]] = frozenset(
     {

@@ -131,9 +131,9 @@ _REWORK_LOOPS: list[tuple[LifecycleStatus, LifecycleStatus]] = [
 def test_rework_loops_are_allowed(
     from_s: LifecycleStatus, to_s: LifecycleStatus
 ) -> None:
-    assert is_transition_allowed(from_s, to_s), (
-        f"Rework loop {from_s} → {to_s} should be allowed"
-    )
+    assert is_transition_allowed(
+        from_s, to_s
+    ), f"Rework loop {from_s} → {to_s} should be allowed"
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +185,7 @@ def test_terminal_states_cannot_transition(
 # ---------------------------------------------------------------------------
 # Any non-terminal → FAILED / ABORTED is always allowed
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("from_s", _ALL_NON_TERMINAL)
 def test_any_non_terminal_can_fail(from_s: LifecycleStatus) -> None:

@@ -24,6 +24,7 @@ from tests.fixtures.golden_state import make_golden_profitability_state
 # Shared fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def golden_state():  # type: ignore[no-untyped-def]
     return make_golden_profitability_state()
@@ -66,9 +67,7 @@ def test_render_report_minimal(benchmark) -> None:  # type: ignore[no-untyped-de
 
 def test_check_render_ready_golden(benchmark, golden_state) -> None:  # type: ignore[no-untyped-def]
     """Baseline: check_render_ready on golden state (all gates cleared)."""
-    benchmark.pedantic(
-        check_render_ready, args=(golden_state,), rounds=5, iterations=3
-    )
+    benchmark.pedantic(check_render_ready, args=(golden_state,), rounds=5, iterations=3)
 
 
 def test_validate_consistency_golden(benchmark, golden_state) -> None:  # type: ignore[no-untyped-def]

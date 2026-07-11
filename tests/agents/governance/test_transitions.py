@@ -57,9 +57,9 @@ def test_happy_path_transitions_allowed(
 def test_rework_loop_transitions_allowed(
     from_s: LifecycleStatus, to_s: LifecycleStatus
 ) -> None:
-    assert is_transition_allowed(from_s, to_s), (
-        f"Rework loop {from_s} → {to_s} should be allowed"
-    )
+    assert is_transition_allowed(
+        from_s, to_s
+    ), f"Rework loop {from_s} → {to_s} should be allowed"
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +96,9 @@ def test_any_non_terminal_can_abort(from_s: LifecycleStatus) -> None:
 )
 def test_terminal_states_cannot_transition(terminal: LifecycleStatus) -> None:
     for to_s in LifecycleStatus:
-        assert not is_transition_allowed(terminal, to_s), (
-            f"Terminal {terminal} should not transition to {to_s}"
-        )
+        assert not is_transition_allowed(
+            terminal, to_s
+        ), f"Terminal {terminal} should not transition to {to_s}"
 
 
 # ---------------------------------------------------------------------------

@@ -101,16 +101,10 @@ def check_render_ready(state: EngagementState) -> ValidationReport:
         )
 
     # Rule 3 — Evidence traceability across all analysis blocks.
-    _check_analysis_block(
-        state.financial_analysis, "financial_analysis", issues
-    )
+    _check_analysis_block(state.financial_analysis, "financial_analysis", issues)
     _check_analysis_block(state.market_analysis, "market_analysis", issues)
-    _check_analysis_block(
-        state.operations_analysis, "operations_analysis", issues
-    )
-    _check_analysis_block(
-        state.strategy_analysis, "strategy_analysis", issues
-    )
+    _check_analysis_block(state.operations_analysis, "operations_analysis", issues)
+    _check_analysis_block(state.strategy_analysis, "strategy_analysis", issues)
     _check_analysis_block(state.risk_analysis, "risk_analysis", issues)
 
     # Rule 4 — Load-bearing assumptions have breakevens.
@@ -135,9 +129,7 @@ def enforce_render_ready(state: EngagementState) -> None:
     report = check_render_ready(state)
     if not report.valid:
         summary = "; ".join(i.detail for i in report.issues[:3])
-        raise ReportRenderError(
-            f"Engagement state is not render-ready: {summary}"
-        )
+        raise ReportRenderError(f"Engagement state is not render-ready: {summary}")
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +150,7 @@ def validate_consistency(state: EngagementState) -> ValidationReport:
     findings_by_section: dict[str, list[str]] = {}
     _collect_findings(state.financial_analysis, "financial", findings_by_section)
     _collect_findings(state.market_analysis, "market", findings_by_section)
-    _collect_findings(
-        state.operations_analysis, "operations", findings_by_section
-    )
+    _collect_findings(state.operations_analysis, "operations", findings_by_section)
     _collect_findings(state.strategy_analysis, "strategy", findings_by_section)
     _collect_findings(state.risk_analysis, "risk", findings_by_section)
 
@@ -227,6 +217,4 @@ def _collect_findings(
 ) -> None:
     if block is None:
         return
-    out[label] = [
-        f.answer for f in block.findings if f.answer is not None
-    ]
+    out[label] = [f.answer for f in block.findings if f.answer is not None]

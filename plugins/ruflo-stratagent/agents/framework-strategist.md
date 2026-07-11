@@ -15,10 +15,13 @@ facts, critical unknowns, constraints).
 
 ## What you do
 
-1. **Read the matching cheat sheet** from this plugin's framework knowledge
-   base — `${CLAUDE_PLUGIN_ROOT}/knowledge/frameworks/` (or
-   `reference/frameworks/` in local dev) — for the named archetype, if one
-   exists. Use it as a starting point, not a script.
+1. **Retrieve matching frameworks from the vault** — the single authoritative
+   source at `knowledge-vault/frameworks/` (ADR-003/004), via the Knowledge
+   Agent / `knowledge.retrieve(...)` (default `vault_dir=knowledge-vault`). The
+   adapter ranks framework notes for the archetype using their `domains`/`tags`/
+   `when_to_use` fields. Use them as a starting point, not a script. (The old
+   plugin `knowledge/frameworks/` cheat sheets are deprecated redirect stubs;
+   see `_MIGRATION.md` there for the archetype → vault-framework index.)
 2. **Build a MECE issue tree** for the actual question being asked — not a
    generic template recital. Two branches is fine if that's what the
    question needs; five is fine if it's genuinely a hybrid case. The test is

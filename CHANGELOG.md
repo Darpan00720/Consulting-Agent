@@ -5,6 +5,100 @@ All notable changes to StratAgent. Format based on
 changes are grouped by implementation milestone under **[Unreleased]** until the
 first tagged release.
 
+## [Unreleased]
+
+_No unreleased changes; all shipped in v0.1.0-rc2 below._
+
+## [0.1.0-rc2] — 2026-07-10
+
+### Repository finalization (open-source release candidate) — docs only
+No code, agents, architecture, or consulting logic changed.
+- **Added the standard OSS files:** root `README.md` (world-class homepage),
+  `LICENSE` (MIT), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant
+  2.1), `SECURITY.md`, `ROADMAP.md`, `CITATION.cff`, `ACKNOWLEDGEMENTS.md`,
+  `SUPPORT.md`, `FAQ.md`.
+- **Refreshed the stale plugin README** (`plugins/ruflo-stratagent/README.md`)
+  to the current system: full lifecycle, 16 agents, vault-canonical framework
+  store, governance/validation/telemetry, `0.1.0-rc2`.
+- **Fixed stale references in `CLAUDE.md`** (framework store → vault; agent
+  count/list → 16).
+- **Added** `docs/release/Repository-Release-Report.md` (release report +
+  documentation audit + cleanup report + repository score).
+
+### Observability — telemetry integration (live path) — added
+Wires the telemetry foundation into the live engagement path. Instrumentation
+only; no consulting logic, agent, or architecture changes.
+
+- **`telemetry.EngagementTracer`** — per-engagement facade (spans, rework,
+  phase markers, analytics) over a JSONL sink + in-memory mirror.
+- **`orchestration.telemetry`** — Python emission bridge: `record_gate` /
+  `instrument_gate` (validation-gate event), `record_governance` (reviewer/
+  challenger verdicts), `content_metadata` / `unsupported_finding_count` derived
+  from `EngagementState`.
+- **CLIs** — `scripts/record_telemetry.py` (the markdown orchestrator's Bash
+  bridge to append a span), `scripts/engagement_telemetry.py` (analytics / OTLP
+  export), `scripts/replay_pilots.py` (pilot replay → sample traces).
+- **SKILL** — `solve-case` now records a span per dispatch (additive telemetry
+  section; consulting instructions unchanged).
+- **Benchmark** — the 3 pilots replayed from real observed run logs into
+  `docs/observability/samples/*.jsonl`; analytics verified (Northwind 15 spans,
+  Halberd rework=1, quality: reviewer pass 1.0 / challenger intervention 1.0 /
+  needs-rework 0.2).
+- **Tests:** +16 (integration, replay, parallel-execution, CLI round-trip);
+  954 total passing. **Docs:** samples README, integration API, updated plan +
+  quickstart.
+
+### Observability & Analytics layer — added
+Additive operational telemetry; no architecture, agent, or consulting-logic
+changes. Sits alongside (does not duplicate) the ADR-002 domain event log.
+
+- **`packages/telemetry/`** — canonical `TelemetryEvent` schema (frozen,
+  JSON/JSONL, OTel-compatible via `to_otlp()`); pluggable sinks (`JSONLSink`
+  append-only, `MemorySink`, `NullSink`, `MultiSink`); `Recorder` (`emit` +
+  timed `span`, sampling, metadata redaction); pure analytics
+  (`engagement_analytics`, `quality_analytics`, `summarize_confidence`).
+- **Tests:** +23 (`tests/telemetry/`), 96% package coverage; 938 total passing.
+- **Docs:** `docs/observability/` — architecture, event schema, analytics
+  definitions, dashboards (Engineering/Product/Research/Operations), API
+  contracts + examples, retention/privacy, implementation plan.
+- **`pyproject.toml`** — registered `telemetry` as first-party.
+- Integration into the live orchestration is **designed, not wired** (agents are
+  markdown prompts); Phases 1–4 in the implementation plan.
+
+### RC1.2 — Architecture Convergence Sprint — complete
+Resolves the architecture inconsistencies found by the RC1 validation campaign.
+No new consulting features.
+
+#### Added
+- **`packages/evidence/`** (WI-4, ADR-007) — Evidence Provider extension
+  mechanism: `EvidenceProvider` Protocol, `ProviderRegistry` (failure isolation,
+  per-call timeout, traceability), `ProviderCache` (TTL, deterministic keys),
+  provenance-carrying `ProviderResult`. No providers populated.
+- **`packages/orchestration/`** + **`scripts/validate_engagement.py`** (WI-2,
+  ADR-006) — live deterministic report gate; blocks report delivery unless
+  `enforce_render_ready` + `validate_consistency` pass, with actionable
+  diagnostics.
+- **ADR-006** (mandatory gates + live validation), **ADR-007** (evidence
+  providers).
+- **Docs:** `Execution-Flow.md`, `DEVELOPER_GUIDE.md`, RC1.2 release notes +
+  migration guide.
+- **Tests:** +54 (provider interface, report-gate, convergence guards).
+
+#### Changed
+- **Framework source of truth (WI-1):** `knowledge-vault/frameworks/` is now
+  canonical. The 9 plugin cheat sheets became deprecated redirect stubs; added
+  `knowledge/frameworks/_MIGRATION.md`. `case-classifier`, `framework-strategist`,
+  and the `solve-case` SKILL repointed to the vault.
+- **Mandatory governance (WI-3):** removed the SKILL's skip-Reviewer rule;
+  Reviewer + Challenger run in every mode. SKILL Phase 8 now runs the live gate.
+- **`pyproject.toml`** — version → `0.1.0-rc2` (RC1.2 sprint); registered
+  `evidence` + `orchestration` as first-party.
+
+#### Unchanged
+- `packages/state`, `persistence`, `replay`, `reporting` behaviour;
+  `knowledge-vault/` note content. Engagement behaviour identical with no
+  providers registered.
+
 ## [0.1.0-rc1] — 2026-07-09
 
 ### M9 — Production Readiness — complete
@@ -72,9 +166,9 @@ first tagged release.
   (reviewer, challenger updated to ADR-005). 50 new tests.
 
 ### Prior milestones (M1–M3)
-See full history in entries below (preserved from [Unreleased]).
+See full history in the pre-release milestone history below.
 
-## [Unreleased]
+## Pre-release milestone history (M0–M6)
 
 ### M2 — Knowledge Library (Obsidian vault + validator) — complete
 #### Added

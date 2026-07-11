@@ -186,7 +186,13 @@ def make_golden_profitability_state() -> EngagementState:
     ).model_copy(update={"id": _NODE_OPEX, "parent": _NODE_COST})
 
     issue_tree = [
-        root, node_revenue, node_cost, node_price, node_volume, node_cogs, node_opex
+        root,
+        node_revenue,
+        node_cost,
+        node_price,
+        node_volume,
+        node_cogs,
+        node_opex,
     ]
 
     # --- Frameworks ---

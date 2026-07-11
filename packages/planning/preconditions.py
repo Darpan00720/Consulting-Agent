@@ -63,9 +63,7 @@ def check_enter_analysis(state: EngagementState) -> GateCheckResult:
             False,
             "engagement_plan is empty — Planner must run first",
         )
-    parent_ids: set[str] = {
-        n.parent for n in state.issue_tree if n.parent is not None
-    }
+    parent_ids: set[str] = {n.parent for n in state.issue_tree if n.parent is not None}
     leaves = [n for n in state.issue_tree if n.id not in parent_ids]
     unowned = [n for n in leaves if not n.owner]
     if unowned:
@@ -83,13 +81,9 @@ def check_enter_governance(state: EngagementState) -> GateCheckResult:
     """Analysis completion gate: all leaf nodes answered + ≥1 analysis block."""
     if not state.issue_tree:
         return GateCheckResult(False, "issue_tree is empty")
-    parent_ids: set[str] = {
-        n.parent for n in state.issue_tree if n.parent is not None
-    }
+    parent_ids: set[str] = {n.parent for n in state.issue_tree if n.parent is not None}
     leaves = [n for n in state.issue_tree if n.id not in parent_ids]
-    unanswered = [
-        n for n in leaves if n.status != IssueNodeStatus.ANSWERED
-    ]
+    unanswered = [n for n in leaves if n.status != IssueNodeStatus.ANSWERED]
     if unanswered:
         return GateCheckResult(
             False,

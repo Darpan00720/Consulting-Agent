@@ -42,9 +42,7 @@ def validate_mece(nodes: list[IssueNode]) -> MeceReport:
     if not nodes:
         return MeceReport(
             valid=False,
-            violations=(
-                MeceViolation("NON_EMPTY", "Issue tree must not be empty"),
-            ),
+            violations=(MeceViolation("NON_EMPTY", "Issue tree must not be empty"),),
         )
 
     violations: list[MeceViolation] = []

@@ -165,11 +165,7 @@ class TestCheckChallengerCanRun:
 
     def test_reviewer_needs_rework_fails(self) -> None:
         state = _base_state().model_copy(
-            update={
-                "reviewer_notes": ReviewerNotes(
-                    verdict=ReviewVerdict.NEEDS_REWORK
-                )
-            }
+            update={"reviewer_notes": ReviewerNotes(verdict=ReviewVerdict.NEEDS_REWORK)}
         )
         result = check_challenger_can_run(state)
         assert not result.passed
@@ -191,9 +187,7 @@ class TestCheckReportingGate:
     def test_reviewer_not_approved_fails(self) -> None:
         state = _base_state().model_copy(
             update={
-                "reviewer_notes": ReviewerNotes(
-                    verdict=ReviewVerdict.NEEDS_REWORK
-                ),
+                "reviewer_notes": ReviewerNotes(verdict=ReviewVerdict.NEEDS_REWORK),
                 "challenge_notes": _challenger_stands(),
             }
         )

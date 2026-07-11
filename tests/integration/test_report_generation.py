@@ -157,9 +157,9 @@ def test_assumption_label_not_on_evidenced_finding() -> None:
     # Find the line with this text
     for line in report.splitlines():
         if "Revenue fell 12% YoY" in line:
-            assert "[ASSUMPTION:" not in line, (
-                "Evidence-backed finding should not carry [ASSUMPTION:] label"
-            )
+            assert (
+                "[ASSUMPTION:" not in line
+            ), "Evidence-backed finding should not carry [ASSUMPTION:] label"
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +219,7 @@ def test_footer_contains_generated_timestamp() -> None:
     report = render_report(make_golden_profitability_state())
     # ISO timestamp pattern: YYYY-MM-DDTHH:MM:SSZ
     import re
+
     assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", report)
 
 

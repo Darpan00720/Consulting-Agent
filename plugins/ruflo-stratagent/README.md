@@ -1,11 +1,16 @@
 # ruflo-stratagent
 
-**Autonomous management-consulting engagements for Claude Code — built on the [Ruflo](https://github.com/ruvnet/ruflo) harness.**
+**Governed management-consulting engagements for Claude Code — built on the [Ruflo](https://github.com/ruvnet/ruflo) harness.**
 
 StratAgent takes a raw business problem (a case-interview prompt, a real client
 brief, or a messy data dump) and runs a full engagement lifecycle: classify the
 problem, scope it, select frameworks, dispatch specialist consultant agents,
-stress-test the conclusions, and produce an executive-ready report.
+**review and challenge** the analysis, validate it, and produce an
+executive-ready report.
+
+> This is the plugin. For the project homepage, installation, and full docs see
+> the repository [root README](../../README.md) and the
+> [Operations Runbook](../../docs/operations/Operations-Runbook.md).
 
 ## What it does
 
@@ -15,38 +20,46 @@ Run one command on any business problem:
 /solve-case <paste the case prompt, or describe the business situation>
 ```
 
-The orchestrator runs a 6-phase engagement (classify → scope → frame → analyze →
-challenge → synthesize → close out) and writes all artifacts to
-`engagements/<slug>/` in your working directory, ending with `report.md`.
+The orchestrator runs the full lifecycle (classify → gaps → plan → frame →
+knowledge → analyze → **review → challenge** → validate → report → close out)
+and writes all artifacts to `engagements/<slug>/`, ending with `report.md`.
+**Governance is mandatory:** the Reviewer and Challenger gates run on every
+engagement, and a deterministic validation gate blocks a report that isn't
+evidence-traceable ([ADR-006](../../docs/architecture/ADR-006-Governance-and-Live-Validation.md)).
 
-### Supported case archetypes
-M&A / acquisition · profitability decline · revenue growth · cost reduction ·
-new market entry · new product launch · pricing strategy · turnaround ·
-and a generic diagnose-and-recommend fallback for anything that doesn't fit a
-named archetype.
+### Case archetypes
+Profitability · market entry · pricing · cost reduction · growth · M&A ·
+due diligence · new product launch · turnaround · digital transformation ·
+organizational design · supply chain · customer experience · product strategy ·
+and a generic diagnose-and-recommend fallback. Framework knowledge for these
+lives in the governed **knowledge vault** (see below).
 
 ## What's inside
 
 | Component | Role |
 |---|---|
 | `commands/solve-case.md` | The `/solve-case` entry point |
-| `skills/solve-case/` | The engagement orchestrator (the lifecycle brain) |
-| `agents/case-classifier` | Names the case type, extracts facts, lists unknowns |
-| `agents/framework-strategist` | Picks/adapts frameworks, builds the MECE issue tree |
-| `agents/financial-analyst` | P&L bridges, unit economics, valuation, sensitivity |
-| `agents/market-analyst` | Market sizing, competitive dynamics, segments |
-| `agents/operations-analyst` | Cost structure, capacity, process, supply chain |
-| `agents/challenger` | Devil's advocate — stress-tests every recommendation |
-| `agents/report-writer` | Synthesizes into an executive deliverable |
-| `knowledge/frameworks/` | One cheat sheet per case archetype |
+| `skills/solve-case/SKILL.md` | The engagement orchestrator (the lifecycle brain) |
+| `agents/*.md` | **16 specialist subagents** (see below) |
+| `knowledge/frameworks/` | **Deprecated redirect stubs** — frameworks now live in `knowledge-vault/frameworks/` (single source of truth; see `_MIGRATION.md`) |
+
+**The 16 agents** (specs: [ADR-005](../../docs/architecture/ADR-005-Agent-Specifications.md)):
+`case-classifier`, `information-gap`, `planner`, `framework-selector`,
+`framework-strategist` (legacy), `issue-tree-generator`, `knowledge-agent`,
+`financial-analyst`, `market-analyst`, `operations-analyst`, `strategy-analyst`,
+`risk-analyst`, `reviewer`, `challenger`, `report-writer`, `knowledge-curator`.
+
+The deterministic platform (`packages/`) provides the state aggregate, knowledge
+retrieval, governance gates, the validation gate, reporting, the evidence-provider
+seam, and telemetry — see the [root README](../../README.md#architecture).
 
 ## Design principles
 
 - **Evidence over assertion.** Every number traces to a given fact or an
   explicit `[ASSUMPTION: ...]`. These labels survive into the final report.
 - **One challenge pass, always.** `challenger` runs on every engagement before
-  the report — not only on request.
-- **Frameworks are tools, not scripts.** `framework-strategist` adapts/combines
+  the report — not only on request (governance gates are mandatory).
+- **Frameworks are tools, not scripts.** Framework selection adapts/combines
   frameworks to the actual question instead of reciting a template.
 
 ## Install
@@ -62,10 +75,9 @@ repo root:
 Then `/solve-case ...` in any project.
 
 ### Standalone dev (no install)
-The repo root also exposes the agents and skill via `.claude/` symlinks into
-this plugin, so running `claude` in the repo root picks up `/solve-case`
-directly without installing. Use one mode at a time (don't install the plugin
-*and* rely on the symlinks in the same workspace).
+The repo root exposes the agents and skill via `.claude/` symlinks into this
+plugin, so running `claude` in the repo root picks up `/solve-case` directly
+without installing. Use one mode at a time.
 
 ## Built on Ruflo
 
@@ -85,11 +97,11 @@ when they're absent — see "Integration with Ruflo" in
 | PII / prompt-injection guardrails | `ruflo-aidefence` |
 | Market data for entry/M&A cases | `ruflo-market-data` |
 
-Plugin-only (no `ruflo init`): fully functional, file-based, no MCP server,
-no hooks, no daemon.
+Plugin-only (no `ruflo init`): fully functional, file-based, no MCP server.
 
 ## Status
 
-`v0.1.0` — packaged from a working prototype. Not yet wired to the Ruflo MCP
-server end to end (that activates after `ruflo init`); deck/spreadsheet
-deliverable generation and a consulting eval harness are planned next.
+`v0.1.0-rc2` — **Ready for Limited Beta**. Decision support under mandatory human
+review, not an autonomous advisor. Independent evaluation and known limitations:
+[Research Evaluation](../../docs/reviews/v1.0-Research-Evaluation.md). Roadmap:
+[ROADMAP.md](../../ROADMAP.md).

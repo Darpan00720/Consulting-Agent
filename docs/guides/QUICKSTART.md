@@ -72,3 +72,24 @@ If challenger says `needs_rework`, the engagement halts and tells you what to fi
 - See [USER_GUIDE.md](USER_GUIDE.md) for complete workflow documentation.
 - See the [RC1 Release Notes](../reviews/RC1-Release-Notes.md) for what's
   included in this release.
+
+## Observability (optional)
+
+Every engagement can emit an operational telemetry trace (durations, tokens,
+retries, governance verdicts) — separate from the report, correlated by
+`engagement_id`. It writes `telemetry/<engagement_id>.jsonl`.
+
+```bash
+# summarize one engagement (durations by phase, confidence, frameworks)
+uv run python scripts/engagement_telemetry.py --engagement <engagement_id>
+
+# quality metrics across all engagements (reviewer pass rate, challenger intervention…)
+uv run python scripts/engagement_telemetry.py --all --quality
+
+# see worked sample traces from the three pilots
+uv run python scripts/replay_pilots.py   # → docs/observability/samples/
+```
+
+Full design: [docs/observability/](../observability/Telemetry-Architecture.md).
+Telemetry never blocks or changes an engagement; disable it and behaviour is
+identical.

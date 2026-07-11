@@ -24,10 +24,14 @@ Pick the closest match from: M&A/acquisition, profitability decline, revenue
 growth, cost reduction, new market entry, new product launch, pricing
 strategy, turnaround, generic diagnose-and-recommend. If it's a genuine
 hybrid (e.g. "should we acquire to enter a new market"), say so explicitly
-and name both archetypes in priority order. Check this plugin's framework
-knowledge base for a matching cheat sheet — look in
-`${CLAUDE_PLUGIN_ROOT}/knowledge/frameworks/` (or `reference/frameworks/` in
-local dev). If you find one, name it so downstream agents know to read it.
+and name both archetypes in priority order. Frameworks live in one
+authoritative source — the governed knowledge vault at
+`knowledge-vault/frameworks/` (ADR-003/004), retrieved via the Knowledge
+Agent / `knowledge.retrieve(...)`. Name the archetype(s) so the Framework
+Selector can retrieve matching notes; you do not need to read framework
+content yourself. An archetype → vault-framework hint index is at
+`${CLAUDE_PLUGIN_ROOT}/knowledge/frameworks/_MIGRATION.md` (the old plugin
+cheat sheets are now deprecated redirect stubs, not a second store).
 
 ### 2. The real question
 One sentence. What decision is the client actually trying to make? Distinguish

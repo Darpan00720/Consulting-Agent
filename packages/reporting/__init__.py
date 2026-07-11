@@ -21,9 +21,7 @@ def engagement_summary(state: EngagementState) -> dict[str, object]:
         "tenant_id": state.metadata.tenant_id,
         "slug": state.metadata.slug,
         "status": state.status.value,
-        "real_question": (
-            state.problem.real_question if state.problem else None
-        ),
+        "real_question": (state.problem.real_question if state.problem else None),
         "archetype": (
             state.classification.primary_archetype.value
             if state.classification
@@ -33,8 +31,7 @@ def engagement_summary(state: EngagementState) -> dict[str, object]:
         "leaf_count": sum(
             1
             for n in state.issue_tree
-            if n.id
-            not in {p.parent for p in state.issue_tree if p.parent is not None}
+            if n.id not in {p.parent for p in state.issue_tree if p.parent is not None}
         ),
         "reviewer_verdict": (
             state.reviewer_notes.verdict.value

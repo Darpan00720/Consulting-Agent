@@ -89,17 +89,12 @@ def _executive_summary(state: EngagementState) -> str:
             lines.append(rec.rationale)
     else:
         lines.append("")
-        lines.append(
-            "*Recommendation pending — engagement analysis not yet complete.*"
-        )
+        lines.append("*Recommendation pending — engagement analysis not yet complete.*")
 
     # Biggest caveat from challenger
     if challenge and challenge.what_would_change:
         lines.append("")
-        lines.append(
-            "**Key caveat:** "
-            + challenge.what_would_change[0]
-        )
+        lines.append("**Key caveat:** " + challenge.what_would_change[0])
     elif challenge and challenge.counter_case:
         lines.append("")
         lines.append(f"**Key caveat:** {challenge.counter_case}")
@@ -112,9 +107,7 @@ def _situation(state: EngagementState) -> str:
 
     if state.problem and state.problem.real_question:
         lines.append("")
-        lines.append(
-            f"**The real question:** {state.problem.real_question}"
-        )
+        lines.append(f"**The real question:** {state.problem.real_question}")
 
     if state.problem and state.problem.raw_input:
         lines.append("")
@@ -144,9 +137,7 @@ def _situation(state: EngagementState) -> str:
         lines.append("**Key stakeholders:**")
         for s in state.stakeholders:
             interest = f" — {s.interest}" if s.interest else ""
-            lines.append(
-                f"- {s.name_or_role} ({s.relationship.value}){interest}"
-            )
+            lines.append(f"- {s.name_or_role} ({s.relationship.value}){interest}")
 
     return "\n".join(lines)
 
@@ -192,9 +183,9 @@ def _issue_tree(state: EngagementState) -> str:
     def _render_node(node: IssueNode, depth: int) -> None:
         indent = "  " * depth
         status_icon = (
-            "✓" if node.status == IssueNodeStatus.ANSWERED
-            else "○" if node.status == IssueNodeStatus.OPEN
-            else "⋯"
+            "✓"
+            if node.status == IssueNodeStatus.ANSWERED
+            else "○" if node.status == IssueNodeStatus.OPEN else "⋯"
         )
         owner = f" *[{node.owner}]*" if node.owner else ""
         conf = ""
@@ -458,9 +449,7 @@ def _appendix_knowledge(state: EngagementState) -> str:
         path = kr.vault_path or ""
         query = (kr.query or "")[:40]
         rel = f"{kr.relevance:.0%}" if kr.relevance is not None else ""
-        lines.append(
-            f"| {kr.kind.value} | {path} | {query} | {rel} |"
-        )
+        lines.append(f"| {kr.kind.value} | {path} | {query} | {rel} |")
 
     return "\n".join(lines)
 

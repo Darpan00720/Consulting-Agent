@@ -37,9 +37,9 @@ def test_retrieve_latency_benchmark(benchmark: pytest.fixture) -> None:  # type:
     # Assert the mean across all benchmark rounds is within target
     stats = benchmark.stats
     mean_ms = stats["mean"] * 1000
-    assert mean_ms <= 200, (
-        f"retrieve() mean latency {mean_ms:.1f} ms exceeds 200 ms target"
-    )
+    assert (
+        mean_ms <= 200
+    ), f"retrieve() mean latency {mean_ms:.1f} ms exceeds 200 ms target"
 
 
 @_skip_no_vault
@@ -56,9 +56,9 @@ def test_retrieve_framework_filter_benchmark(benchmark: pytest.fixture) -> None:
 
     stats = benchmark.stats
     mean_ms = stats["mean"] * 1000
-    assert mean_ms <= 200, (
-        f"filtered retrieve() mean latency {mean_ms:.1f} ms exceeds 200 ms target"
-    )
+    assert (
+        mean_ms <= 200
+    ), f"filtered retrieve() mean latency {mean_ms:.1f} ms exceeds 200 ms target"
 
 
 # ── wall-clock fallback (runs even without pytest-benchmark rounds) ────────────
@@ -74,9 +74,9 @@ def test_retrieve_wall_clock_under_200ms() -> None:
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     assert isinstance(results, list)
-    assert elapsed_ms <= 200, (
-        f"retrieve() took {elapsed_ms:.1f} ms — exceeds 200 ms target (§9.9)"
-    )
+    assert (
+        elapsed_ms <= 200
+    ), f"retrieve() took {elapsed_ms:.1f} ms — exceeds 200 ms target (§9.9)"
 
 
 @_skip_no_vault

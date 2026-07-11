@@ -17,8 +17,8 @@ plugins/ruflo-stratagent/           — THE PLUGIN (single source of truth)
   .claude-plugin/plugin.json        — plugin manifest
   commands/solve-case.md            — /solve-case entry point
   skills/solve-case/SKILL.md        — engagement orchestrator (the lifecycle brain)
-  agents/*.md                       — 7 specialist consultant subagents
-  knowledge/frameworks/*.md         — framework cheat sheets per case archetype
+  agents/*.md                       — 16 specialist consultant subagents
+  knowledge/frameworks/*.md         — deprecated redirect stubs (frameworks live in knowledge-vault/)
   README.md                         — full plugin docs
 .claude/agents   -> plugin agents   — symlink, for standalone `claude` dev
 .claude/skills   -> plugin skills   — symlink, for standalone `claude` dev
@@ -50,14 +50,19 @@ end to end (classify → scope → frame → analyze → challenge → synthesiz
 close out). It is the only thing the user invokes; everything else is a
 dispatched subagent.
 
-**Specialist subagents** — `agents/*.md`: `case-classifier`,
-`framework-strategist`, `financial-analyst`, `market-analyst`,
-`operations-analyst`, `challenger`, `report-writer`. The orchestrator passes
-context explicitly and merges results; subagents don't talk to each other.
+**Specialist subagents** — `agents/*.md` (16): `case-classifier`,
+`information-gap`, `planner`, `framework-selector`, `framework-strategist`
+(legacy), `issue-tree-generator`, `knowledge-agent`, `financial-analyst`,
+`market-analyst`, `operations-analyst`, `strategy-analyst`, `risk-analyst`,
+`reviewer`, `challenger`, `report-writer`, `knowledge-curator`. The orchestrator
+passes context explicitly and merges results; subagents don't talk to each other.
 
-**Framework library** — `knowledge/frameworks/*.md`, one cheat sheet per
-archetype. Read by `case-classifier` and `framework-strategist`; keep these
-current rather than hardcoding framework knowledge into agent prompts.
+**Framework library** — the single source of truth is the governed knowledge
+vault, `knowledge-vault/frameworks/*.md` (retrieved via the Knowledge Agent /
+`knowledge.retrieve`). The plugin's `knowledge/frameworks/*.md` are **deprecated
+redirect stubs** since RC1.2 (see their `_MIGRATION.md`) — do not add framework
+content there. Keep framework knowledge in the vault rather than hardcoding it
+into agent prompts.
 
 ## Built on Ruflo
 

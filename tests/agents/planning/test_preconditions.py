@@ -133,9 +133,7 @@ class TestCheckEnterPlanning:
                     primary_archetype=CaseArchetype.PROFITABILITY,
                     confidence=0.9,
                 ),
-                "problem": ProblemDefinition(
-                    raw_input="Problem.", real_question=None
-                ),
+                "problem": ProblemDefinition(raw_input="Problem.", real_question=None),
             }
         )
         result = check_enter_planning(state)
@@ -160,21 +158,15 @@ class TestCheckEnterAnalysis:
 
     def test_no_plan_fails(self) -> None:
         root = _node("Is profit declining?", owner=None, nid="root")
-        leaf = _node(
-            "Is price declining?", owner="financial-analyst", parent="root"
-        )
-        state = _classified_state().model_copy(
-            update={"issue_tree": [root, leaf]}
-        )
+        leaf = _node("Is price declining?", owner="financial-analyst", parent="root")
+        state = _classified_state().model_copy(update={"issue_tree": [root, leaf]})
         result = check_enter_analysis(state)
         assert not result.passed
         assert "plan" in result.reason.lower()
 
     def test_leaf_without_owner_fails(self) -> None:
         root = _node("Is profit declining?", owner=None, nid="root")
-        leaf = _node(
-            "Is price declining?", owner=None, parent="root"
-        )
+        leaf = _node("Is price declining?", owner=None, parent="root")
         state = _classified_state().model_copy(
             update={
                 "issue_tree": [root, leaf],
@@ -187,9 +179,7 @@ class TestCheckEnterAnalysis:
 
     def test_fully_owned_tree_with_plan_passes(self) -> None:
         root = _node("Is profit declining?", owner=None, nid="root")
-        leaf = _node(
-            "Is price declining?", owner="financial-analyst", parent="root"
-        )
+        leaf = _node("Is price declining?", owner="financial-analyst", parent="root")
         state = _classified_state().model_copy(
             update={
                 "issue_tree": [root, leaf],
@@ -218,9 +208,7 @@ class TestCheckEnterGovernance:
             parent="root",
             status=IssueNodeStatus.OPEN,
         )
-        state = _classified_state().model_copy(
-            update={"issue_tree": [root, leaf]}
-        )
+        state = _classified_state().model_copy(update={"issue_tree": [root, leaf]})
         result = check_enter_governance(state)
         assert not result.passed
         assert "not yet answered" in result.reason
@@ -233,9 +221,7 @@ class TestCheckEnterGovernance:
             parent="root",
             status=IssueNodeStatus.ANSWERED,
         )
-        state = _classified_state().model_copy(
-            update={"issue_tree": [root, leaf]}
-        )
+        state = _classified_state().model_copy(update={"issue_tree": [root, leaf]})
         result = check_enter_governance(state)
         assert not result.passed
         assert "analysis" in result.reason.lower()
@@ -271,11 +257,7 @@ class TestCheckEnterReporting:
 
     def test_reviewer_needs_rework_fails(self) -> None:
         state = _classified_state().model_copy(
-            update={
-                "reviewer_notes": ReviewerNotes(
-                    verdict=ReviewVerdict.NEEDS_REWORK
-                )
-            }
+            update={"reviewer_notes": ReviewerNotes(verdict=ReviewVerdict.NEEDS_REWORK)}
         )
         result = check_enter_reporting(state)
         assert not result.passed

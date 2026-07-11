@@ -1,34 +1,15 @@
-# New product launch
+# new-product-launch — DEPRECATED (RC1.2)
 
-## When this applies
-"Should we launch product X," "how should we go to market with this new
-offering," "is this product idea worth pursuing."
+> **Moved.** Framework content now lives in the governed knowledge vault at
+> `knowledge-vault/frameworks/` (ADR-003 / ADR-004), the single source of truth.
+>
+> This cheat sheet is a **redirect stub** kept for backwards compatibility.
+> It contains no framework content.
 
-## Core questions, in order
-1. **Is there real demand?** — Target customer/segment, the job-to-be-done,
-   willingness to pay, and the size of that demand (TAM/SAM/SOM, as in
-   market-entry.md).
-2. **What's the competitive/substitute landscape?** — Direct competitors,
-   indirect substitutes (including "do nothing"), and what differentiates
-   this offering enough to win share or create new demand.
-3. **Can we build and deliver it?** — Required capability, time-to-market,
-   development/production cost, and whether internal build, partnership, or
-   acquisition of the capability is the right path.
-4. **What's the economics?** — Unit economics at scale (contribution margin
-   per unit), expected volume ramp (realistic, not straight-line — see
-   market-entry.md trap), breakeven volume/timeline, and cannibalization of
-   existing products if relevant (net incremental contribution, not gross).
-5. **What's the go-to-market plan?** — Channel, pricing (route to
-   pricing.md if pricing is the crux), and launch sequencing (pilot/limited
-   launch vs. full launch).
+**How to get frameworks for the `new-product-launch` archetype:**
+Query the vault via the **Knowledge Agent** (or `knowledge.retrieve(...)`,
+default `vault_dir=knowledge-vault`). The adapter ranks framework notes by
+archetype using each note's `domains` / `tags` / `when_to_use` fields.
 
-## Common traps
-- Validating that a product is technically buildable without validating
-  demand or willingness to pay.
-- Ignoring cannibalization of existing revenue when sizing the net benefit.
-- Assuming a fast, straight-line adoption ramp.
-
-## Typical recommendation shapes
-Launch (with a stated GTM sequence and breakeven expectation), launch a
-narrower pilot first, redesign the offering before launch, or don't launch
-(with the specific demand, economics, or capability gap named).
+See [`_MIGRATION.md`](./_MIGRATION.md) for the archetype → vault-framework index
+and the full migration rationale.

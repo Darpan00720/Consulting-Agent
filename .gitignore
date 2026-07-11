@@ -40,3 +40,10 @@ knowledge-vault/graphify-out/
 
 # Persisted engagement runtime artifacts (M1.8, P-DD-C) — keep the convention README
 engagements/*/
+
+# Telemetry runtime output (per-engagement JSONL). Committed samples live under
+# docs/observability/samples/ — the runtime telemetry/ dir is not shipped.
+/telemetry/
+
+# Obsidian editor UI state inside the vault (not project content)
+knowledge-vault/.obsidian/

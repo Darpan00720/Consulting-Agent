@@ -126,12 +126,8 @@ def test_parent_node_may_have_no_owner() -> None:
         parent="root",
         nid="l1",
     )
-    leaf_a = _node(
-        "Is price declining?", owner="financial-analyst", parent="l1"
-    )
-    leaf_b = _node(
-        "Is volume declining?", owner="financial-analyst", parent="l1"
-    )
+    leaf_a = _node("Is price declining?", owner="financial-analyst", parent="l1")
+    leaf_b = _node("Is volume declining?", owner="financial-analyst", parent="l1")
     report = validate_mece([root, l1, leaf_a, leaf_b])
     assert report.valid, report.violations
 
