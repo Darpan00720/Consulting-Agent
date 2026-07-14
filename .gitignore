@@ -47,3 +47,15 @@ engagements/*/
 
 # Obsidian editor UI state inside the vault (not project content)
 knowledge-vault/.obsidian/
+
+# Dashboard (apps/dashboard) runtime artifacts
+apps/dashboard/backend/dashboard.db
+apps/dashboard/backend/.venv/
+apps/dashboard/frontend/.next/
+apps/dashboard/frontend/next-env.d.ts
+apps/dashboard/frontend/tsconfig.tsbuildinfo
+
+# Local AI-tool runtime artifacts (not project content)
+.agents/
+.codex/
+.claude-flow/

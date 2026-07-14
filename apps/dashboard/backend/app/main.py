@@ -1,0 +1,58 @@
+"""StratAgent Dashboard API.
+
+Run locally:
+    cd apps/dashboard/backend
+    uv run uvicorn app.main:app --reload --port 8000
+
+No accounts: users bring their own Anthropic API key (kept in their browser,
+sent per-request, never stored). A server-side ANTHROPIC_API_KEY, if set,
+powers a small quota-limited free tier. STRATAGENT_MOCK=1 needs no key at all.
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app import config, db
+from app.routers import cases, engagements, lessons
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db.connect()
+    yield
+
+
+app = FastAPI(
+    title="StratAgent Dashboard API",
+    version="0.2.0",
+    description="Run governed AI consulting engagements from the browser.",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(engagements.router)
+app.include_router(lessons.router)
+app.include_router(cases.router)
+
+
+@app.get("/api/health")
+def health() -> dict[str, object]:
+    return {
+        "ok": True,
+        "model": config.MODEL,
+        "models": config.MODEL_CHOICES,
+        "mock": config.MOCK_MODE,
+        "free_tier": config.SERVER_HAS_KEY or config.MOCK_MODE,
+        "free_tier_quota": config.DAILY_ENGAGEMENT_QUOTA,
+    }

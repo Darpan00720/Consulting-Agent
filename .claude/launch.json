@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard-backend",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "uvicorn", "app.main:app", "--port", "8000"],
+      "cwd": "apps/dashboard/backend",
+      "env": { "STRATAGENT_MOCK": "1" },
+      "port": 8000
+    },
+    {
+      "name": "dashboard-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "apps/dashboard/frontend",
+      "port": 3000
+    }
+  ]
+}
