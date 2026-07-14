@@ -5,36 +5,51 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Repo root: apps/dashboard/backend/app/config.py -> four parents up.
-REPO_ROOT = Path(__file__).resolve().parents[4]
+def _default_agents_dir() -> Path:
+    try:
+        return Path(__file__).resolve().parents[4] / "plugins" / "ruflo-stratagent" / "agents"
+    except IndexError:
+        return Path("/agents")
 
-AGENTS_DIR = Path(
-    os.environ.get(
-        "STRATAGENT_AGENTS_DIR",
-        REPO_ROOT / "plugins" / "ruflo-stratagent" / "agents",
-    )
-)
-VAULT_FRAMEWORKS_DIR = Path(
-    os.environ.get(
-        "STRATAGENT_VAULT_DIR",
-        REPO_ROOT / "knowledge-vault" / "frameworks",
-    )
-)
+
+def _default_vault_dir() -> Path:
+    try:
+        return Path(__file__).resolve().parents[4] / "knowledge-vault" / "frameworks"
+    except IndexError:
+        return Path("/vault/frameworks")
+
+
+AGENTS_DIR = Path(os.environ.get("STRATAGENT_AGENTS_DIR") or str(_default_agents_dir()))
+VAULT_FRAMEWORKS_DIR = Path(os.environ.get("STRATAGENT_VAULT_DIR") or str(_default_vault_dir()))
 
 DB_PATH = Path(os.environ.get("STRATAGENT_DB", Path(__file__).resolve().parents[1] / "dashboard.db"))
 
-# Groq API — free tier, OpenAI-compatible. Key comes from GROQ_API_KEY env var.
-MODEL = os.environ.get("STRATAGENT_MODEL", "llama-3.3-70b-versatile")
-MAX_TOKENS = int(os.environ.get("STRATAGENT_MAX_TOKENS", "8000"))
-REPORT_MAX_TOKENS = int(os.environ.get("STRATAGENT_REPORT_MAX_TOKENS", "16000"))
+# LLM access is a multi-provider failover chain (see pipeline/providers.py):
+# Gemini 2.5 Flash → OpenRouter free → Groq. Providers join the chain when
+# their key is present: GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY.
+# Per-provider model overrides: GEMINI_MODEL, OPENROUTER_MODEL, GROQ_MODEL.
+# BYOK premium path: a user-supplied Anthropic key runs the whole engagement
+# on STRATAGENT_BYOK_MODEL (default claude-opus-4-8), bypassing the free chain
+# and the daily quota. The key is per-request only — never stored or logged.
+MODEL = "auto"
+MAX_TOKENS = int(os.environ.get("STRATAGENT_MAX_TOKENS", "4096"))
+REPORT_MAX_TOKENS = int(os.environ.get("STRATAGENT_REPORT_MAX_TOKENS", "8192"))
 
-# Models available on Groq's free tier (no cost, no card required).
+# The user-facing "model" choice is the chain itself — providers and models
+# are a server concern. Legacy Groq ids stay accepted for old clients.
 MODEL_CHOICES = [
-    {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B — best free quality", "tier": "balanced"},
-    {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B Instant — fastest", "tier": "cheap"},
-    {"id": "moonshotai/kimi-k2-instruct", "label": "Kimi K2 — strong reasoning", "tier": "best"},
+    {
+        "id": "auto",
+        "label": "Auto — Gemini 2.5 Flash with automatic fallback (OpenRouter, Groq)",
+        "tier": "auto",
+    },
 ]
-_ALLOWED_MODELS = {m["id"] for m in MODEL_CHOICES}
+_LEGACY_MODELS = {
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+}
+_ALLOWED_MODELS = {m["id"] for m in MODEL_CHOICES} | _LEGACY_MODELS
 
 
 def is_allowed_model(model: str) -> bool:
@@ -50,9 +65,14 @@ MAX_REWORK = int(os.environ.get("STRATAGENT_MAX_REWORK", "1"))
 # Useful for demos, local frontend work, and tests.
 MOCK_MODE = os.environ.get("STRATAGENT_MOCK", "") == "1"
 
-# Whether the server has a Groq API key. All users share this key
-# (rate-limited per client-id by DAILY_ENGAGEMENT_QUOTA).
-SERVER_HAS_KEY = bool(os.environ.get("GROQ_API_KEY"))
+# Whether the server has at least one provider API key. All users share the
+# server keys (rate-limited per client-id by DAILY_ENGAGEMENT_QUOTA).
+SERVER_HAS_KEY = bool(
+    os.environ.get("GEMINI_API_KEY")
+    or os.environ.get("GOOGLE_API_KEY")
+    or os.environ.get("OPENROUTER_API_KEY")
+    or os.environ.get("GROQ_API_KEY")
+)
 
 # Per-user daily engagement quota (public-product rate limiting).
 DAILY_ENGAGEMENT_QUOTA = int(os.environ.get("STRATAGENT_DAILY_QUOTA", "5"))

@@ -1,18 +1,21 @@
-"""Groq API call helper for the engagement pipeline.
+"""Agent call entry point for the engagement pipeline.
 
-Uses Groq's OpenAI-compatible endpoint (free tier, no credit card required).
-Mock mode returns canned output so the full pipeline runs without any API key.
+Delegates to the multi-provider failover chain in ``providers.py``
+(Gemini 2.5 Flash → OpenRouter free → Groq). Mock mode returns canned
+output so the full pipeline runs without any API key.
 """
 
 from __future__ import annotations
 
-import os
+import logging
 
 import openai
 
 from app import config
+from app.pipeline import providers
 
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+logging.basicConfig(level=logging.WARNING)
+log = logging.getLogger(__name__)
 
 
 def friendly_error(exc: Exception) -> str:
@@ -23,31 +26,26 @@ def friendly_error(exc: Exception) -> str:
 
     if isinstance(exc, openai.AuthenticationError) or status == 401:
         return (
-            "The Groq API key was rejected. Check GROQ_API_KEY at "
-            "console.groq.com → API Keys and make sure it starts with gsk_."
+            "An API key was rejected by its provider. If you supplied your own "
+            "API key, please check it; otherwise the server's provider keys "
+            "(GEMINI_API_KEY / OPENROUTER_API_KEY / GROQ_API_KEY) need attention."
         )
+    if isinstance(exc, openai.NotFoundError) or status == 404:
+        return "The configured model was not found on its provider."
     if isinstance(exc, openai.PermissionDeniedError) or status == 403:
-        return "This Groq API key doesn't have permission to use the requested model."
-    if isinstance(exc, openai.RateLimitError) or status == 429:
+        return "An AI provider API key doesn't have permission for the requested model."
+    if isinstance(exc, openai.RateLimitError) or status == 429 or "rate limit" in low or "rate_limit" in low:
         return (
-            "Groq rate-limited this request. The free tier has a per-minute token "
-            "cap — wait a moment and run the engagement again."
+            "All configured AI providers are rate-limited right now. "
+            "Wait a minute and run the engagement again."
         )
     if isinstance(exc, openai.APIConnectionError):
-        return "Could not reach the Groq API — check the network and try again."
-    if "rate limit" in low or "rate_limit" in low:
-        return (
-            "Groq rate-limited this request. Wait a moment and run the engagement again."
-        )
+        return "Could not reach any AI provider — check the network and try again."
     if status is not None and status >= 500:
-        return "The Groq API had a temporary error. Please run the engagement again."
+        return "The AI provider had a temporary error. Please run the engagement again."
+    if "no llm provider configured" in low:
+        return message
     return message.split("\n")[0][:300] or "The engagement failed unexpectedly."
-
-
-def _get_client() -> openai.AsyncOpenAI:
-    # api_key=None → openai SDK reads OPENAI_API_KEY; we override with GROQ_API_KEY.
-    key = os.environ.get("GROQ_API_KEY")
-    return openai.AsyncOpenAI(base_url=GROQ_BASE_URL, api_key=key or "mock-key")
 
 
 async def call_agent(
@@ -56,29 +54,26 @@ async def call_agent(
     user_message: str,
     *,
     max_tokens: int | None = None,
-    api_key: str | None = None,  # kept for interface compatibility; ignored (no BYOK)
-    model: str | None = None,
+    api_key: str | None = None,  # user's own Anthropic key (BYOK premium path)
+    model: str | None = None,    # kept for interface compatibility; chain picks models
 ) -> str:
-    """Run one specialist agent as a single Groq API call; return markdown."""
+    """Run one specialist agent as a single LLM call; return markdown.
+
+    With ``api_key`` the call runs on the user's own Anthropic key (premium
+    Claude model, no free-tier limits). Otherwise the provider failover chain
+    decides which free provider serves the call, paces requests to each
+    provider's rate limits, and fails over automatically on outages.
+    """
     if config.MOCK_MODE:
         return _mock_output(agent_name)
 
-    client = _get_client()
-    response = await client.chat.completions.create(
-        model=model or config.MODEL,
+    return await providers.call_with_failover(
+        agent_name,
+        system_prompt,
+        user_message,
         max_tokens=max_tokens or config.MAX_TOKENS,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
+        byok_key=api_key,
     )
-    text = (response.choices[0].message.content or "").strip()
-    if not text:
-        raise RuntimeError(
-            f"{agent_name} returned no text "
-            f"(finish_reason={response.choices[0].finish_reason})"
-        )
-    return text
 
 
 def _mock_output(agent_name: str) -> str:
@@ -86,13 +81,14 @@ def _mock_output(agent_name: str) -> str:
         return (
             "SCORE: 62\n"
             "GOT: demo run — canned output, not a real grade\n"
-            "MISSED: this was a mock-mode run; set GROQ_API_KEY for a real graded benchmark"
+            "MISSED: this was a mock-mode run; set a provider API key for a real graded benchmark"
         )
     return (
         f"## {agent_name} (demo output)\n\n"
-        "**This was a demo run** — the server is in mock mode and no Groq API "
+        "**This was a demo run** — the server is in mock mode and no LLM API "
         f"call was made, so this is canned output from {agent_name}.\n\n"
-        "Set `GROQ_API_KEY` in the server environment to get real engagement "
-        "analysis. Groq is free — get a key at console.groq.com.\n\n"
+        "Set `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, or `GROQ_API_KEY` in the "
+        "server environment to get real engagement analysis — all three have "
+        "free tiers.\n\n"
         "- Finding 1: placeholder\n- Finding 2: placeholder\n"
     )

@@ -1,12 +1,17 @@
-version: "3.9"
-
 services:
   backend:
-    build: ./backend
+    build:
+      context: ../../   # repo root — Dockerfile needs agents/ and knowledge-vault/
+      dockerfile: apps/dashboard/backend/Dockerfile
     environment:
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      STRATAGENT_MODEL: ${STRATAGENT_MODEL:-claude-haiku-4-5}
+      # Provider failover chain: Gemini → OpenRouter → Groq. Any subset works;
+      # providers without a key are skipped.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
       STRATAGENT_DAILY_QUOTA: ${STRATAGENT_DAILY_QUOTA:-5}
+      STRATAGENT_AGENTS_DIR: /agents
+      STRATAGENT_VAULT_DIR: /vault
     volumes:
       # Persist the SQLite database between restarts
       - backend_data:/app/data
@@ -18,8 +23,6 @@ services:
     build:
       context: ./frontend
       args:
-        # Tell the browser where to reach the backend.
-        # Change this to your public domain when deploying.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"

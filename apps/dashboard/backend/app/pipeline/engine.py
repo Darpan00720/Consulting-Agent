@@ -79,7 +79,7 @@ PHASES = [
     ("planning", "planner"),
     ("framing", "framework-selector"),
     ("issue_tree", "issue-tree-generator"),
-    ("analysis", "5 analysts (parallel)"),
+    ("analysis", "5 specialist analysts"),
     ("reconcile", "engagement-manager"),
     ("review", "reviewer"),
     ("challenge", "challenger"),
@@ -102,11 +102,14 @@ quality review.
 Produce a CANONICAL RECONCILIATION with exactly these parts, in markdown:
 
 ## Canonical assumption ledger
-One table, globally unique IDs (A1, A2, …). Every load-bearing assumption appears
-ONCE. When two analysts defined the same figure differently (e.g. both used
-"AL-10", or financial said cost synergy $30M while operations said $15M), you
-MUST pick ONE authoritative value and state why (prefer the more conservative /
-better-sourced figure; a hard operational ceiling beats an optimistic estimate).
+One table, globally unique IDs (A1, A2, …). RENUMBER every analyst-local ID
+(AL-1, A-001, "AL-1 (strategy)", etc.) into this single A-n sequence — the final
+ledger must contain exactly one ID scheme with no suffixes or per-analyst
+namespaces. Every load-bearing assumption appears ONCE. When two analysts
+defined the same figure differently (e.g. both used "AL-10", or financial said
+cost synergy $30M while operations said $15M), you MUST pick ONE authoritative
+value and state why (prefer the more conservative / better-sourced figure; a
+hard operational ceiling beats an optimistic estimate).
 Columns: ID | Value | Confidence | Owner | Breakeven (what would flip it).
 
 ## Reconciled key figures
@@ -115,6 +118,31 @@ computed consistently from the canonical ledger above: e.g. net synergy, the
 value-creating price/premium ceiling, NPV at the expected price, the walk-away
 price. If the analysts disagreed, compute the single authoritative number here
 and note which analyst figure it supersedes.
+NO CIRCULAR VALUATIONS: every valuation must be derived from its INPUTS
+(cash flows, growth, margin, discount rate) — never back-solved from its own
+breakeven, from the offer being evaluated, or from the conclusion it is meant
+to test. If an analyst's "intrinsic value" was reverse-engineered from the
+deal multiple or a breakeven threshold, mark it OPEN ("no independent
+valuation exists") instead of laundering it into a figure.
+
+## Options value comparison
+One row per strategic option on a LIKE-FOR-LIKE basis: same horizon, same
+discount rate, each valued as risk-adjusted value INCREMENTAL to the status quo
+(doing nothing). Columns: Option | Risk-adjusted incremental value | Key driver
+| Canonical IDs. Then one sentence naming which option has the highest number.
+If an analyst's recommended option is NOT the highest-value row, do not change
+the recommendation — but state the gap explicitly (e.g. "Option B recommended
+despite €XM lower value; the offsetting factor claimed is Y, unquantified") so
+the challenger and report-writer must confront it.
+
+## Issue tree closure
+One row per leaf question in the issue tree — this table is the authoritative
+record of coverage (the tree's own status/answer fields are never updated).
+Columns: Question (abbreviated) | Answer (one sentence, quantified) |
+Status (answered / assumed) | Basis (canonical IDs, e.g. A3, A7).
+Every leaf must appear. If no analyst addressed a leaf, close it from the
+canonical ledger where possible and mark it "assumed"; if it genuinely cannot
+be closed, mark it OPEN and state what evidence would close it.
 
 ## Corrections applied
 A bullet list of every collision or contradiction you resolved (ID reused,
@@ -162,8 +190,9 @@ def _standing_lessons() -> str:
     )
 
 
-# The reflection step. After a BLOCKED engagement, distil what the reviewer /
-# challenger caught into DURABLE PROCESS lessons that guardrail future runs.
+# The reflection step. After EVERY engagement, distil what the reviewer /
+# challenger caught into DURABLE PROCESS lessons that guardrail future runs —
+# the learning loop: each engagement makes the next one better.
 # Hard anti-leakage guard: method only, never case facts — otherwise lessons
 # would contaminate unrelated engagements.
 REFLECTION_SYSTEM = """You extract DURABLE PROCESS LESSONS from a consulting
@@ -250,6 +279,7 @@ async def run_engagement(
             "classify",
             "case-classifier",
             f"{case}\n\nProduce the structured intake brief.",
+            max_tokens=2000,
         )
 
         outputs["gap_analysis"] = await phase(
@@ -261,6 +291,7 @@ async def run_engagement(
             "ledger. This is a non-interactive run: for every gap, ASSUME with a "
             "labeled `[ASSUMPTION AL-xx: ...]` entry (statement, working value, "
             "confidence, breakeven) rather than escalating to a human.",
+            max_tokens=2000,
         )
 
         outputs["planning"] = await phase(
@@ -270,6 +301,7 @@ async def run_engagement(
             + _section("Intake brief", outputs["classify"])
             + _section("Information gaps & assumption ledger", outputs["gap_analysis"])
             + "\n\nProduce the engagement plan.",
+            max_tokens=1500,
         )
 
         outputs["framing"] = await phase(
@@ -285,6 +317,20 @@ async def run_engagement(
             + "\n\nSelect and adapt the primary and supporting frameworks from the "
             "index above. Name each selected framework exactly as it appears in "
             "the index.",
+            max_tokens=1500,
+        )
+
+        # Retrieval: pull the FULL vault notes for the frameworks the selector
+        # named, so downstream agents work from governed framework content
+        # rather than the model's memory of it.
+        framework_knowledge = prompts.selected_framework_notes(outputs["framing"])
+        knowledge_section = (
+            _section(
+                "Selected framework notes (governed knowledge vault)",
+                framework_knowledge,
+            )
+            if framework_knowledge
+            else ""
         )
 
         outputs["issue_tree"] = await phase(
@@ -293,6 +339,7 @@ async def run_engagement(
             case
             + _section("Intake brief", outputs["classify"])
             + _section("Framework selection", outputs["framing"])
+            + knowledge_section
             + lessons
             + "\n\nBuild the MECE issue tree with owned, testable leaves.\n\n"
             "If this is an acquisition / M&A / market-entry case, the tree MUST be "
@@ -316,22 +363,28 @@ async def run_engagement(
             "7. Integration and execution risk.\n"
             "Assign each branch to the most appropriate owner; the market-analyst owns "
             "commercial-capability and go-to-market branches, not just market sizing.",
+            max_tokens=3000,
         )
 
-        # --- analysis: five specialists in parallel --------------------------
+        # --- analysis: five specialists in SEQUENTIAL order -------------------
+        # Groq free tier: 6 000 TPM. Each analyst call is ~3 000 tokens total
+        # (1 000 input + 2 000 max output). The throttle in claude.py enforces
+        # 65 s between calls, giving the bucket 6 500 token refill headroom.
+        # Analysts run one-at-a-time (no semaphore needed) using MINIMAL context:
+        # only case + key assumptions + issue tree — not all 5 prior outputs.
         await _emit(
             engagement_id,
             "phase_started",
-            {"phase": "analysis", "agent": "5 analysts (parallel)"},
+            {"phase": "analysis", "agent": "5 specialist analysts"},
         )
-        analysis_context = (
+
+        # Compact context for analysts: case + key assumptions + issue tree only.
+        # This keeps analyst input ≤ 1 500 tokens (fits within 6 k TPM per call).
+        analyst_base_context = (
             case
-            + lessons
-            + _section("Intake brief", outputs["classify"])
-            + _section("Assumption ledger", outputs["gap_analysis"])
-            + _section("Engagement plan", outputs["planning"])
-            + _section("Framework selection", outputs["framing"])
+            + _section("Key assumptions & information gaps", outputs["gap_analysis"])
             + _section("Issue tree", outputs["issue_tree"])
+            + knowledge_section
         )
 
         async def run_analyst(agent: str) -> tuple[str, str]:
@@ -340,12 +393,15 @@ async def run_engagement(
             result = await call(
                 agent,
                 prompts.agent_system_prompt(agent),
-                analysis_context
-                + f"\n\nAnswer the issue-tree branches owned by the {agent}. "
-                "Label every quantitative input `[ASSUMPTION: ...]` or cite an "
-                "AL-xx ledger entry — never invent data.",
+                analyst_base_context
+                + f"\n\nAnswer only the issue-tree branches owned by the {agent}. "
+                "Produce concise, quantified analysis. Label every assumption "
+                "with a sequentially numbered ID: `[ASSUMPTION AL-1: ...]`, "
+                "`[ASSUMPTION AL-2: ...]`, and so on — never output a literal "
+                "placeholder like 'AL-xx'. Keep total response under 500 words.",
                 api_key=api_key,
                 model=model,
+                max_tokens=2000,
             )
             await _emit(
                 engagement_id,
@@ -354,7 +410,10 @@ async def run_engagement(
             )
             return agent, result
 
-        analyst_results = await asyncio.gather(*(run_analyst(a) for a in ANALYSTS))
+        # Run analysts sequentially to stay within Groq 6 k TPM.
+        analyst_results: list[tuple[str, str]] = []
+        for analyst_name in ANALYSTS:
+            analyst_results.append(await run_analyst(analyst_name))
         analyst_outputs: dict[str, str] = {a: r for a, r in analyst_results}
 
         def render_analysis() -> str:
@@ -366,48 +425,77 @@ async def run_engagement(
         await _emit(
             engagement_id,
             "phase_completed",
-            {"phase": "analysis", "agent": "5 analysts (parallel)", "output": render_analysis()},
+            {"phase": "analysis", "agent": "5 specialist analysts", "output": render_analysis()},
         )
 
         # --- Engagement Manager reconciliation + governance (ADR-006) --------
-        # The parallel analysts collide on assumption IDs and numbers. Before
-        # review, an EM pass harmonizes everything into ONE canonical ledger.
-        # If the reviewer still returns needs_rework, the EM re-reconciles
-        # against the reviewer's issues (rather than re-running the analysts,
-        # which would just re-collide). Capped by MAX_REWORK.
+        # Context budget: Groq 6 k TPM. Reconcile receives ONLY analyst outputs
+        # (not the full accumulated phase history) to keep input ≤ 4 000 tokens.
         analysis_detail = _section("Analyst findings (supporting detail)", render_analysis())
+        # Minimal reconcile context: case + issue tree + analyst outputs.
+        reconcile_context = (
+            case
+            + _section("Issue tree", outputs["issue_tree"])
+            + analysis_detail
+        )
 
         canonical = await phase(
             "reconcile",
             "engagement-manager",
-            analysis_context
-            + analysis_detail
+            reconcile_context
             + "\n\nReconcile the five analyst blocks above into the canonical "
             "reconciliation. Resolve every assumption-ID collision and every "
             "figure two analysts defined differently into ONE authoritative value.",
             system_override=ENGAGEMENT_MANAGER_SYSTEM,
+            max_tokens=3500,
         )
 
         review = ""
         review_verdict = "needs_rework"
         for attempt in range(config.MAX_REWORK + 1):
+            # Review context: case + issue tree + canonical + analyst notes.
+            # The analyst notes get a "NOT reviewable" framing: they predate the
+            # canonical ledger, so they cannot cite A-IDs and their figures may
+            # be superseded — reviewing them for traceability/calibration would
+            # fail every engagement on sequencing grounds, not substance.
             governance_context = (
-                analysis_context
+                case
+                + _section("Issue tree", outputs["issue_tree"])
                 + _section("CANONICAL RECONCILIATION — single source of truth", canonical)
-                + analysis_detail
+                + _section(
+                    "Analyst working notes — context only, NOT reviewable",
+                    "These notes were written BEFORE the canonical reconciliation "
+                    "existed: analysts cannot cite canonical A-IDs that had not yet "
+                    "been minted, and individual figures may be superseded by the "
+                    "reconciliation. Do not raise traceability, calibration, or "
+                    "ID-hygiene issues against this section.\n\n" + render_analysis(),
+                )
             )
             review = await phase(
                 "review",
                 "reviewer",
                 governance_context
                 + "\n\nA CANONICAL RECONCILIATION has been provided above; treat it as "
-                "the single source of truth. Run all five checks (MECE, evidence "
-                "traceability, consistency, calibration, gap closure) AGAINST the "
-                "canonical ledger — do NOT fail consistency for historical values in the "
-                "analyst detail that the canonical ledger explicitly supersedes. Fail "
-                "consistency only if the canonical ledger itself is internally "
-                "contradictory or the recommendation conflicts with it. Verdict: "
-                "approved / needs_rework; if needs_rework, list each issue specifically.",
+                "the single source of truth and run all five checks (MECE, evidence "
+                "traceability, consistency, calibration, gap closure) AGAINST it. "
+                "Review scope — this is a single-pass pipeline, not the full "
+                "state-machine harness: (1) the issue tree is a list of questions; "
+                "its status/answer/evidence_refs fields are never updated after "
+                "generation, so judge coverage by the 'Issue tree closure' table in "
+                "the canonical reconciliation, never by the tree's own bookkeeping "
+                "fields; (2) a placeholder or stale assumption ID inside raw analyst "
+                "text is non-blocking when the canonical ledger resolves that figure — "
+                "the reconciliation supersedes analyst detail; (3) apply the evidence-"
+                "traceability and confidence-calibration checks ONLY to the canonical "
+                "reconciliation tables — the analyst working notes predate the ledger "
+                "and are exempt; (4) numbers stated in the case prompt are client "
+                "facts — arithmetic performed directly on client facts needs no "
+                "assumption reference; (5) fail ONLY for substantive defects: a "
+                "load-bearing question with no answer in the closure table, a "
+                "contradiction the reconciliation failed to resolve, a decision-"
+                "critical figure with no quantification, or a canonical-ledger row "
+                "whose confidence is unjustified. Verdict: approved / needs_rework.",
+                max_tokens=2000,
             )
             review_verdict = _reviewer_verdict(review)
             await _emit(
@@ -426,20 +514,22 @@ async def run_engagement(
             canonical = await phase(
                 "reconcile",
                 "engagement-manager",
-                analysis_context
+                reconcile_context
                 + _section("Your previous canonical reconciliation", canonical)
-                + analysis_detail
                 + _section("Reviewer's required fixes — resolve every one", review)
                 + "\n\nProduce a corrected canonical reconciliation that fixes every "
-                "issue the reviewer raised. Keep unique IDs; resolve any remaining "
-                "collision or contradiction to a single authoritative value.",
+                "issue the reviewer raised.",
                 system_override=ENGAGEMENT_MANAGER_SYSTEM,
+                max_tokens=6000,
             )
             await _emit(engagement_id, "rework_completed", {"attempt": attempt + 1})
 
         outputs["analysis"] = render_analysis()
-        governance_context = (
-            analysis_context
+        # Challenge and report: receive ONLY canonical + analyst outputs
+        # (not the full prior-phase history) to keep input ≤ 3 500 tokens.
+        final_context = (
+            case
+            + _section("Issue tree", outputs["issue_tree"])
             + _section("CANONICAL RECONCILIATION — single source of truth", canonical)
             + analysis_detail
         )
@@ -447,11 +537,17 @@ async def run_engagement(
         challenge = await phase(
             "challenge",
             "challenger",
-            governance_context
+            final_context
             + _section("Reviewer notes", review)
-            + f"\n\nReviewer verdict: {review_verdict}. Attack the load-bearing "
-            "assumptions and build the strongest counter-case. Verdict: stands / "
-            "stands_with_caveats / needs_rework.",
+            + f"\n\nReviewer verdict: {review_verdict}. Run your challenge NOW "
+            "regardless of that verdict — this is a single-pass pipeline with no "
+            "later opportunity, so the precondition that the reviewer must first "
+            "approve does not apply here. Attack the load-bearing assumptions and "
+            "build the strongest counter-case. Judge ONLY the substance of the "
+            "recommendation — process or bookkeeping complaints belong to the "
+            "reviewer, not you. End with exactly one line: `VERDICT: stands` or "
+            "`VERDICT: stands_with_caveats` or `VERDICT: needs_rework`.",
+            max_tokens=2000,
         )
         challenge_verdict = _challenger_verdict(challenge)
         await _emit(engagement_id, "challenge_verdict", {"verdict": challenge_verdict})
@@ -464,7 +560,7 @@ async def run_engagement(
         report = await phase(
             "reporting",
             "report-writer",
-            governance_context
+            final_context
             + _section("Reviewer notes", review)
             + _section("Challenger notes", challenge)
             + f"\n\nGovernance state: reviewer={review_verdict}, challenger={challenge_verdict}. "
@@ -494,7 +590,28 @@ async def run_engagement(
             "figures; keep prose tight and decision-oriented (MECE, no hedging beyond "
             "the labeled assumptions).\n"
             "- Preserve every `[ASSUMPTION]` label verbatim and incorporate every "
-            "challenger caveat. Never upgrade an assumption to a fact.",
+            "challenger caveat. Never upgrade an assumption to a fact.\n"
+            "- The recommendation must WIN THE NUMBERS: per the 'Options value "
+            "comparison', if another option has higher risk-adjusted value, either "
+            "recommend that option or quantify the factor (option value, risk "
+            "asymmetry, strategic control) that closes the gap — in euros, in the "
+            "executive summary. Never publish a report whose own counter-case is "
+            "numerically dominant and unanswered.\n"
+            "- Number hygiene: write money as €310.8M / €2,680M / €3.4B — commas "
+            "for thousands, never periods (never `€2.680M` meaning €2,680M); use "
+            "one consistent rounding per figure across the whole document.\n"
+            f"- Every milestone, monitoring trigger, and due date must be AFTER "
+            f"{_today()}; never reference a past quarter as a future checkpoint.\n"
+            "- ID hygiene: cite ONLY canonical ledger IDs (A1, A2, …) everywhere — "
+            "body sections included. Never copy an analyst-local ID (AL-n, A-001) "
+            "into the report; if a source note used one, translate it to the "
+            "canonical ID before citing. The appendix and the body must use one "
+            "identical ID scheme.\n"
+            "- Sanity-check the value logic in the executive summary: if the "
+            "recommendation is to accept an offer, the offer must be shown ≥ the "
+            "independent value of the alternative (or the gap explicitly priced); "
+            "never state that an offer is below intrinsic value and recommend "
+            "accepting it without pricing why.",
             max_tokens=config.REPORT_MAX_TOKENS,
         )
 
@@ -506,26 +623,32 @@ async def run_engagement(
             review_ready=review_ready,
         )
 
-        # Reflection loop: on a BLOCKED engagement, distil durable process
-        # lessons that guardrail future runs. Runs on the cheapest model and
+        # Learning loop: after EVERY engagement, distil durable process lessons
+        # from what the reviewer and challenger caught — approved runs still
+        # surface caveats worth guarding against next time. One cheap call;
         # never fails the engagement.
-        if not review_ready:
-            try:
-                reflection = await call(
-                    "reflector",
-                    REFLECTION_SYSTEM,
-                    _section("Reviewer notes", review)
-                    + _section("Challenger notes", challenge)
-                    + "\n\nExtract the durable process lessons (method only, no case "
-                    "facts). Output `LESSON: ...` lines, or NONE.",
-                    api_key=api_key,
-                    model="claude-haiku-4-5",
-                )
-                for lesson in _parse_lessons(reflection):
-                    if db.add_lesson(lesson, engagement_id):
-                        await _emit(engagement_id, "lesson_learned", {"lesson": lesson})
-            except Exception:  # noqa: BLE001 — reflection must never break a run
-                pass
+        try:
+            focus = (
+                "The gates did NOT clear — extract what went wrong in the method."
+                if not review_ready
+                else "The gates cleared — extract what the reviewer/challenger still "
+                "flagged (caveats, near-misses) so the next engagement avoids "
+                "even those."
+            )
+            reflection = await call(
+                "reflector",
+                REFLECTION_SYSTEM,
+                _section("Reviewer notes", review)
+                + _section("Challenger notes", challenge)
+                + f"\n\n{focus}\nExtract the durable process lessons (method only, "
+                "no case facts). Output `LESSON: ...` lines, or NONE.",
+                api_key=api_key,
+            )
+            for lesson in _parse_lessons(reflection):
+                if db.add_lesson(lesson, engagement_id):
+                    await _emit(engagement_id, "lesson_learned", {"lesson": lesson})
+        except Exception:  # noqa: BLE001 — reflection must never break a run
+            pass
 
         await _emit(
             engagement_id,

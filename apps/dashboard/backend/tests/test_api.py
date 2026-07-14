@@ -56,9 +56,9 @@ def test_requires_client_id(client):
 def test_agent_prompts_load():
     # engagement-manager uses an inline system prompt (no agents/*.md file);
     # the analyst-group phase label isn't a single agent either.
-    inline = {"engagement-manager"}
+    inline = {"engagement-manager", "5 specialist analysts"}
     for _, agent in PHASES:
-        if agent.endswith("(parallel)") or agent in inline:
+        if agent in inline:
             continue
         assert len(prompts.agent_system_prompt(agent)) > 100
     for agent in ANALYSTS:
@@ -229,23 +229,31 @@ def test_reflection_dedupes_lessons(tmp_path, monkeypatch):
     db.reset_for_tests()
 
 
-def test_reflection_skipped_when_review_ready(tmp_path, monkeypatch):
-    """A clean (approved) engagement learns nothing — reflection is blocked-only."""
+def test_reflection_learns_on_every_engagement(tmp_path, monkeypatch):
+    """The learning loop runs on approved engagements too — every engagement
+    can mint lessons that improve future runs."""
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "clean.db")
     db.reset_for_tests()
+    reflector_prompts: list[str] = []
 
     async def fake_call(agent, system, user, **kw):
         if agent == "reviewer":
             return "Verdict: approved"
         if agent == "challenger":
-            return "Verdict: stands"
+            return "Verdict: stands_with_caveats"
         if agent == "reflector":
-            raise AssertionError("reflection must not run on an approved engagement")
+            reflector_prompts.append(user)
+            return "LESSON: State the breakeven for every load-bearing assumption."
         return f"output-of-{agent}"
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
-    assert db.list_lessons() == []
+    assert len(reflector_prompts) == 1
+    # approved runs get the "gates cleared" framing, not the failure framing
+    assert "gates cleared" in reflector_prompts[0]
+    lessons = db.list_lessons()
+    assert len(lessons) == 1
+    assert "breakeven" in lessons[0]["text"]
     db.reset_for_tests()
 
 
@@ -302,6 +310,31 @@ def test_free_tier_quota(client):
     over = client.post("/api/engagements", json={"case_prompt": CASE}, headers=CID_A)
     assert over.status_code == 429
     assert "limit" in over.json()["detail"].lower()
+
+
+def test_byok_bypasses_quota(client):
+    """A user-supplied API key is the premium path — no daily quota."""
+    for _ in range(4):  # one past the quota of 3
+        response = client.post(
+            "/api/engagements",
+            json={"case_prompt": CASE, "api_key": "sk-ant-test-premium-key"},
+            headers=CID_A,
+        )
+        assert response.status_code == 202
+
+
+def test_api_key_never_persisted(client, tmp_path):
+    """The BYOK key must not survive the request: not in the DB, not in events."""
+    key = "sk-ant-secret-do-not-store-me"
+    engagement_id = client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "api_key": key},
+        headers=CID_A,
+    ).json()["id"]
+    # Drain the run, then inspect everything the server persisted.
+    client.get(f"/api/engagements/{engagement_id}/events", headers=CID_A)
+    raw = (tmp_path / "test.db").read_bytes()
+    assert key.encode() not in raw
 
 
 def test_ownership_isolation(client):

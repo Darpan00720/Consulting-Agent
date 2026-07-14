@@ -2,12 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import {
-  api,
-  type CaseSummary,
-  type EvalRun,
-  type ModelChoice,
-} from "@/lib/api";
+import { api, type CaseSummary, type EvalRun } from "@/lib/api";
 
 function scoreColor(score: number): string {
   if (score >= 85) return "#15803d"; // green
@@ -32,11 +27,9 @@ function ScoreBadge({ score }: { score: number | null }) {
 
 function CaseRow({
   c,
-  model,
   onDeleted,
 }: {
   c: CaseSummary;
-  model: string;
   onDeleted: () => void;
 }) {
   const [evals, setEvals] = useState<EvalRun[]>([]);
@@ -61,7 +54,7 @@ function CaseRow({
     setError(null);
     setStarting(true);
     try {
-      await api.runEval(c.id, model);
+      await api.runEval(c.id);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start the run");
@@ -137,8 +130,6 @@ function CaseRow({
 
 export default function BenchmarkPage() {
   const [cases, setCases] = useState<CaseSummary[] | null>(null);
-  const [models, setModels] = useState<ModelChoice[]>([]);
-  const [model, setModel] = useState("claude-haiku-4-5");
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -153,10 +144,7 @@ export default function BenchmarkPage() {
       .catch((e) => setError(e.message));
   }, []);
 
-  useEffect(() => {
-    load();
-    api.health().then((h) => setModels(h.models)).catch(() => {});
-  }, [load]);
+  useEffect(load, [load]);
 
   async function addCase(e: React.FormEvent) {
     e.preventDefault();
@@ -222,23 +210,9 @@ export default function BenchmarkPage() {
           <button type="submit" disabled={saving}>
             {saving ? "Saving…" : "Save case"}
           </button>
-          <label htmlFor="bm-model" className="muted" style={{ fontSize: ".85rem" }}>
-            Run on
-          </label>
-          <select id="bm-model" value={model} onChange={(e) => setModel(e.target.value)}>
-            {(models.length
-              ? models
-              : [{ id: "claude-haiku-4-5", label: "Haiku 4.5 — cheapest", tier: "cheap" }]
-            ).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
         </div>
         <p className="muted" style={{ fontSize: ".8rem", marginTop: ".5rem" }}>
-          Tip: benchmark on Haiku while iterating (~5× cheaper); the grader
-          always runs on Haiku. No API key needed.
+          Runs are free — no API key needed.
         </p>
       </form>
 
@@ -255,7 +229,7 @@ export default function BenchmarkPage() {
 
       <div style={{ marginTop: "1.2rem" }}>
         {cases?.map((c) => (
-          <CaseRow key={c.id} c={c} model={model} onDeleted={load} />
+          <CaseRow key={c.id} c={c} onDeleted={load} />
         ))}
       </div>
     </div>

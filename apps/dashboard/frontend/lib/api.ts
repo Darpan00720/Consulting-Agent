@@ -1,6 +1,8 @@
-// Thin client for the dashboard API. No accounts, no API keys.
+// Thin client for the dashboard API. No accounts required.
 //  - Identity = anonymous per-browser id (localStorage, sent as X-Client-Id)
-//  - The server holds the Anthropic API key; users need no key to run cases.
+//  - Free tier: the server's own provider keys serve the run (daily quota).
+//  - Premium (BYOK): the user's own API key travels in the request body for
+//    that run only — kept in localStorage, never stored on the server.
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -102,14 +104,14 @@ export const api = {
   listLessons: () => request<Lesson[]>("/api/lessons"),
   deleteLesson: (id: number) =>
     fetch(`${API_URL}/api/lessons/${id}`, { method: "DELETE" }),
-  createEngagement: (casePrompt: string, model?: string) =>
+  createEngagement: (casePrompt: string, apiKey?: string) =>
     request<{ id: string; status: string; phases: string[] }>(
       "/api/engagements",
       {
         method: "POST",
         body: JSON.stringify({
           case_prompt: casePrompt,
-          model: model || undefined,
+          api_key: apiKey || undefined,
         }),
       },
     ),

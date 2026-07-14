@@ -6,16 +6,20 @@ WORKDIR /app
 RUN pip install uv
 
 # Copy dependency files first for layer caching
-COPY pyproject.toml uv.lock* ./
+COPY apps/dashboard/backend/pyproject.toml apps/dashboard/backend/uv.lock* ./
 
 # Install runtime deps (no dev extras)
 RUN uv sync --no-dev
 
-# Copy source
-COPY . .
+# Copy backend source
+COPY apps/dashboard/backend/app ./app
+
+# Copy the agent prompts and knowledge vault the backend reads at runtime
+COPY plugins/ruflo-stratagent/agents /agents
+COPY knowledge-vault /vault
 
 # Non-root user
-RUN useradd -m app && chown -R app /app
+RUN useradd -m app && chown -R app /app /agents /vault
 USER app
 
 EXPOSE 8000

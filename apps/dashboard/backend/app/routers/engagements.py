@@ -1,8 +1,16 @@
-"""Engagement endpoints — no accounts, no signup, no API key from users.
+"""Engagement endpoints — no accounts, no signup, keys never stored.
 
 Identity is an anonymous, browser-generated client ID sent as the
 ``X-Client-Id`` header (or ``?client=`` for SSE, since EventSource cannot set
-headers). The server holds the Groq key; users just paste a case and run.
+headers). Two ways to run a case:
+
+- **Free tier**: no key at all — the server's own provider chain serves the
+  run, rate-limited per client id by the daily quota.
+- **Best results (BYOK)**: the user sends their own API key — Anthropic,
+  OpenAI, OpenRouter, Groq, or Google — in the request body. The provider is
+  detected from the key prefix and the whole run uses that provider's top
+  model. The key is handed straight to the pipeline for this run only —
+  NEVER persisted, NEVER logged, and it bypasses the free-tier quota.
 """
 
 from __future__ import annotations
@@ -19,6 +27,7 @@ from pydantic import BaseModel, Field
 from app import config, db
 from app.events import bus
 from app.pipeline.engine import PHASES, run_engagement
+from app.pipeline.providers import UnsupportedKeyError, detect_byok
 
 router = APIRouter(prefix="/api/engagements", tags=["engagements"])
 
@@ -41,6 +50,9 @@ def client_id(
 class CreateEngagementRequest(BaseModel):
     case_prompt: str = Field(min_length=40, max_length=20_000)
     model: str | None = Field(default=None, max_length=64)
+    # User's own API key (any supported provider — best-results path).
+    # Used for this run only — never persisted, never logged.
+    api_key: str | None = Field(default=None, min_length=8, max_length=200)
 
 
 class EngagementSummary(BaseModel):
@@ -59,18 +71,29 @@ async def create_engagement(
     if model is not None and not config.is_allowed_model(model):
         raise HTTPException(status_code=422, detail=f"Unsupported model: {model}")
 
-    if not (config.SERVER_HAS_KEY or config.MOCK_MODE):
-        raise HTTPException(
-            status_code=503,
-            detail="The server is not configured with a Groq API key. "
-            "Set GROQ_API_KEY in the server environment.",
-        )
-    if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} engagements/24h). "
-            "Please try again tomorrow.",
-        )
+    byok = bool(body.api_key)
+    if byok:
+        # Reject an unrecognized key format up front (clear 422) rather than
+        # letting the engagement start and fail minutes in.
+        try:
+            detect_byok(body.api_key or "")
+        except UnsupportedKeyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        if not (config.SERVER_HAS_KEY or config.MOCK_MODE):
+            raise HTTPException(
+                status_code=503,
+                detail="The server has no AI provider key configured. Set "
+                "GEMINI_API_KEY, OPENROUTER_API_KEY, or GROQ_API_KEY in the "
+                "server environment — or supply your own API key with the run.",
+            )
+        if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} "
+                "engagements/24h). Try again tomorrow — or add your own API key "
+                "for unlimited premium runs.",
+            )
 
     try:
         engagement_id = db.create_engagement(cid, body.case_prompt)
@@ -84,7 +107,9 @@ async def create_engagement(
         ) from exc
 
     asyncio.create_task(
-        run_engagement(engagement_id, body.case_prompt, model=model)
+        run_engagement(
+            engagement_id, body.case_prompt, model=model, api_key=body.api_key
+        )
     )
     return {"id": engagement_id, "status": "queued", "phases": [p for p, _ in PHASES]}
 
