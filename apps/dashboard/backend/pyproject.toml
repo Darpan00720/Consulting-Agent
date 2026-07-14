@@ -1,12 +1,12 @@
 [project]
 name = "stratagent-dashboard"
 version = "0.1.0"
-description = "Web dashboard backend for StratAgent — run consulting engagements via the Claude API"
+description = "Web dashboard backend for StratAgent — run consulting engagements via the Groq API (free tier)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "anthropic>=0.116",
+    "openai>=1.50",
     "pydantic>=2.7",
     "email-validator>=2.3.0",
 ]

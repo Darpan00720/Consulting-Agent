@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      STRATAGENT_MODEL: ${STRATAGENT_MODEL:-claude-haiku-4-5}
+      STRATAGENT_DAILY_QUOTA: ${STRATAGENT_DAILY_QUOTA:-5}
+    volumes:
+      # Persist the SQLite database between restarts
+      - backend_data:/app/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Tell the browser where to reach the backend.
+        # Change this to your public domain when deploying.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_data:

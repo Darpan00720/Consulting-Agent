@@ -29,8 +29,6 @@ class CreateCaseRequest(BaseModel):
 
 
 class RunEvalRequest(BaseModel):
-    # Same BYOK semantics as engagements: used for this run only, never stored.
-    api_key: str | None = Field(default=None, min_length=20, max_length=300)
     model: str | None = Field(default=None, max_length=64)
 
 
@@ -77,30 +75,22 @@ async def run_eval(
 ) -> dict[str, Any]:
     case = _owned_case(case_id, cid)
 
-    api_key = body.api_key.strip() if body.api_key else None
-    if api_key and not api_key.startswith("sk-ant-"):
-        raise HTTPException(
-            status_code=422,
-            detail="That doesn't look like an Anthropic API key (should start with sk-ant-)",
-        )
     model = body.model
     if model is not None and not config.is_allowed_model(model):
         raise HTTPException(status_code=422, detail=f"Unsupported model: {model}")
 
-    if api_key is None:
-        # Same free-tier gating as engagements: server credentials + quota.
-        if not (config.SERVER_HAS_KEY or config.MOCK_MODE):
-            raise HTTPException(
-                status_code=402,
-                detail="Add your Anthropic API key to run a benchmark — it stays in "
-                "your browser and is used only for your runs.",
-            )
-        if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} engagements/24h). "
-                "Add your own API key for unlimited runs.",
-            )
+    if not (config.SERVER_HAS_KEY or config.MOCK_MODE):
+        raise HTTPException(
+            status_code=503,
+            detail="The server is not configured with a Groq API key. "
+            "Set GROQ_API_KEY in the server environment.",
+        )
+    if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} engagements/24h). "
+            "Please try again tomorrow.",
+        )
 
     try:
         engagement_id = db.create_engagement(cid, case["prompt"])
@@ -118,7 +108,6 @@ async def run_eval(
             engagement_id,
             case["prompt"],
             case["rubric"],
-            api_key=api_key,
             model=model,
         )
     )

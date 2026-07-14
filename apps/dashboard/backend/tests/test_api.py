@@ -1,7 +1,7 @@
-"""Dashboard API tests — run entirely in mock mode (no Claude API calls).
+"""Dashboard API tests — run entirely in mock mode (no Groq API calls).
 
-No accounts: identity is the anonymous X-Client-Id header; the user's API key
-travels in the create-engagement body and must never be persisted.
+No accounts: identity is the anonymous X-Client-Id header.
+Server holds the Groq key; users need no key to run cases.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ CASE = (
 
 CID_A = {"X-Client-Id": "browser-aaaa-1111"}
 CID_B = {"X-Client-Id": "browser-bbbb-2222"}
-FAKE_KEY = "sk-ant-test-0000000000000000wxyz"
 
 
 @pytest.fixture()
@@ -291,7 +290,8 @@ def test_engine_failure_marks_failed(tmp_path, monkeypatch):
     db.reset_for_tests()
 
 
-def test_free_tier_quota_without_key(client):
+def test_free_tier_quota(client):
+    """After DAILY_ENGAGEMENT_QUOTA runs, the next one is rate-limited."""
     for _ in range(3):
         assert (
             client.post(
@@ -301,93 +301,7 @@ def test_free_tier_quota_without_key(client):
         )
     over = client.post("/api/engagements", json={"case_prompt": CASE}, headers=CID_A)
     assert over.status_code == 429
-    assert "API key" in over.json()["detail"]
-
-
-def test_byok_bypasses_quota_and_reaches_engine(client, monkeypatch):
-    seen_keys: list[str | None] = []
-    from app.routers import engagements as eng_router
-
-    async def spy_engagement(engagement_id, case_prompt, *, api_key=None, **kw):
-        seen_keys.append(api_key)
-        db.set_engagement_status(engagement_id, "completed", report_md="ok")
-
-    monkeypatch.setattr(eng_router, "run_engagement", spy_engagement)
-
-    # quota is 3; with a key the user can exceed it
-    for _ in range(5):
-        response = client.post(
-            "/api/engagements",
-            json={"case_prompt": CASE, "api_key": FAKE_KEY},
-            headers=CID_A,
-        )
-        assert response.status_code == 202
-    assert all(k == FAKE_KEY for k in seen_keys)
-
-
-def test_mock_only_applies_to_keyless_runs(monkeypatch):
-    """A user-supplied key must bypass mock mode and reach the real client."""
-    from app.pipeline import claude as claude_mod
-
-    class _FakeStream:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def get_final_message(self):
-            class Block:
-                type = "text"
-                text = "real-pipeline-output"
-
-            class Message:
-                content = [Block()]
-                stop_reason = "end_turn"
-
-            return Message()
-
-    class _FakeMessages:
-        def stream(self, **kw):
-            return _FakeStream()
-
-    class _FakeClient:
-        messages = _FakeMessages()
-
-    monkeypatch.setattr(claude_mod, "_get_client", lambda key: _FakeClient())
-
-    # with a key: real path, even though STRATAGENT_MOCK=1
-    with_key = asyncio.run(
-        claude_mod.call_agent("financial-analyst", "s" * 200, "case", api_key=FAKE_KEY)
-    )
-    assert with_key == "real-pipeline-output"
-
-    # without a key: canned demo output
-    keyless = asyncio.run(claude_mod.call_agent("financial-analyst", "s" * 200, "case"))
-    assert "demo" in keyless
-
-
-def test_api_key_never_persisted(client):
-    created = client.post(
-        "/api/engagements",
-        json={"case_prompt": CASE, "api_key": FAKE_KEY},
-        headers=CID_A,
-    )
-    assert created.status_code == 202
-    # nothing anywhere in the DB may contain the key
-    conn = db.connect()
-    for table in ("engagements", "events"):
-        for row in conn.execute(f"SELECT * FROM {table}"):
-            assert FAKE_KEY not in str(tuple(row))
-
-
-def test_malformed_key_rejected(client):
-    bad = client.post(
-        "/api/engagements",
-        json={"case_prompt": CASE, "api_key": "not-an-anthropic-key-at-all"},
-        headers=CID_A,
-    )
-    assert bad.status_code == 422
+    assert "limit" in over.json()["detail"].lower()
 
 
 def test_ownership_isolation(client):
@@ -400,6 +314,34 @@ def test_ownership_isolation(client):
     assert (
         client.get(f"/api/engagements/{engagement_id}", headers=CID_A).status_code == 200
     )
+
+
+def test_mock_mode_returns_canned_output():
+    """In mock mode (no GROQ_API_KEY set), call_agent returns demo text."""
+    from app.pipeline import claude as claude_mod
+
+    output = asyncio.run(
+        claude_mod.call_agent("financial-analyst", "s" * 200, "case")
+    )
+    assert "demo" in output.lower()
+
+
+def test_friendly_error():
+    from app.pipeline.claude import friendly_error
+
+    class Fake:
+        def __init__(self, status: int, msg: str) -> None:
+            self.status_code = status
+            self.message = msg
+
+        def __str__(self) -> str:
+            return self.message
+
+    assert "rate" in friendly_error(Fake(429, "rate limit exceeded")).lower()
+    assert "rejected" in friendly_error(Fake(401, "invalid api key"))
+    # Never leak raw JSON blobs to the user
+    assert "{" not in friendly_error(Fake(401, '{"error": "invalid_api_key"}'))
+    assert "temporary" in friendly_error(Fake(500, "internal server error")).lower()
 
 
 # --- golden-case benchmark ----------------------------------------------------
@@ -530,23 +472,3 @@ def test_parse_grade():
     assert missed == ["no KOL analysis", "alternatives"]
     assert _parse_grade("no structure at all") == (None, [])
     assert _parse_grade("SCORE: 400")[0] == 100  # clamped
-
-
-def test_friendly_error_billing():
-    import anthropic
-
-    from app.pipeline.claude import friendly_error
-
-    class FakeBilling(Exception):
-        status_code = 400
-        message = "Your credit balance is too low to access the Anthropic API."
-
-    msg = friendly_error(FakeBilling())
-    assert "no API credits" in msg
-    assert "{" not in msg  # never leak raw JSON
-
-    class FakeAuth(anthropic.AuthenticationError):
-        def __init__(self):
-            pass
-
-    assert "rejected" in friendly_error(FakeAuth())

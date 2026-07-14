@@ -23,18 +23,16 @@ VAULT_FRAMEWORKS_DIR = Path(
 
 DB_PATH = Path(os.environ.get("STRATAGENT_DB", Path(__file__).resolve().parents[1] / "dashboard.db"))
 
-# Claude API. ANTHROPIC_API_KEY is resolved by the SDK itself (env var or
-# `ant auth login` profile) — we never read the key directly.
-MODEL = os.environ.get("STRATAGENT_MODEL", "claude-opus-4-8")
-MAX_TOKENS = int(os.environ.get("STRATAGENT_MAX_TOKENS", "16000"))
-REPORT_MAX_TOKENS = int(os.environ.get("STRATAGENT_REPORT_MAX_TOKENS", "32000"))
+# Groq API — free tier, OpenAI-compatible. Key comes from GROQ_API_KEY env var.
+MODEL = os.environ.get("STRATAGENT_MODEL", "llama-3.3-70b-versatile")
+MAX_TOKENS = int(os.environ.get("STRATAGENT_MAX_TOKENS", "8000"))
+REPORT_MAX_TOKENS = int(os.environ.get("STRATAGENT_REPORT_MAX_TOKENS", "16000"))
 
-# Models a user may pick per engagement, cheapest→best. The tier label and
-# rough per-case cost help users iterate cheaply (Haiku) and finalize on Opus.
+# Models available on Groq's free tier (no cost, no card required).
 MODEL_CHOICES = [
-    {"id": "claude-haiku-4-5", "label": "Haiku 4.5 — cheapest, for bulk iteration", "tier": "cheap"},
-    {"id": "claude-sonnet-5", "label": "Sonnet 5 — balanced, near-Opus quality", "tier": "balanced"},
-    {"id": "claude-opus-4-8", "label": "Opus 4.8 — best, for final runs", "tier": "best"},
+    {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B — best free quality", "tier": "balanced"},
+    {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B Instant — fastest", "tier": "cheap"},
+    {"id": "moonshotai/kimi-k2-instruct", "label": "Kimi K2 — strong reasoning", "tier": "best"},
 ]
 _ALLOWED_MODELS = {m["id"] for m in MODEL_CHOICES}
 
@@ -52,12 +50,9 @@ MAX_REWORK = int(os.environ.get("STRATAGENT_MAX_REWORK", "1"))
 # Useful for demos, local frontend work, and tests.
 MOCK_MODE = os.environ.get("STRATAGENT_MOCK", "") == "1"
 
-# Whether the server itself has Claude credentials. Users without their own
-# key fall back to this (subject to the daily quota); BYOK users are exempt
-# from the quota because the spend is theirs.
-SERVER_HAS_KEY = bool(
-    os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-)
+# Whether the server has a Groq API key. All users share this key
+# (rate-limited per client-id by DAILY_ENGAGEMENT_QUOTA).
+SERVER_HAS_KEY = bool(os.environ.get("GROQ_API_KEY"))
 
 # Per-user daily engagement quota (public-product rate limiting).
 DAILY_ENGAGEMENT_QUOTA = int(os.environ.get("STRATAGENT_DAILY_QUOTA", "5"))

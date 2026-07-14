@@ -1,9 +1,8 @@
-"""Engagement endpoints — no accounts, no signup.
+"""Engagement endpoints — no accounts, no signup, no API key from users.
 
 Identity is an anonymous, browser-generated client ID sent as the
 ``X-Client-Id`` header (or ``?client=`` for SSE, since EventSource cannot set
-headers). The user's Anthropic API key travels in the request body, is handed
-straight to the Claude client, and is **never persisted**.
+headers). The server holds the Groq key; users just paste a case and run.
 """
 
 from __future__ import annotations
@@ -41,9 +40,6 @@ def client_id(
 
 class CreateEngagementRequest(BaseModel):
     case_prompt: str = Field(min_length=40, max_length=20_000)
-    # The user's own Anthropic API key (BYOK). Used for this run only — never stored.
-    api_key: str | None = Field(default=None, min_length=20, max_length=300)
-    # Optional per-run model override (cheaper models for bulk iteration).
     model: str | None = Field(default=None, max_length=64)
 
 
@@ -59,32 +55,22 @@ class EngagementSummary(BaseModel):
 async def create_engagement(
     body: CreateEngagementRequest, cid: str = Depends(client_id)
 ) -> dict[str, Any]:
-    api_key = body.api_key.strip() if body.api_key else None
-    if api_key and not api_key.startswith("sk-ant-"):
-        raise HTTPException(
-            status_code=422,
-            detail="That doesn't look like an Anthropic API key (should start with sk-ant-)",
-        )
-
     model = body.model
     if model is not None and not config.is_allowed_model(model):
         raise HTTPException(status_code=422, detail=f"Unsupported model: {model}")
 
-    if api_key is None:
-        # No key supplied — fall back to server credentials, quota-limited.
-        # (Mock mode counts as server credentials so the flow stays testable.)
-        if not (config.SERVER_HAS_KEY or config.MOCK_MODE):
-            raise HTTPException(
-                status_code=402,
-                detail="Add your Anthropic API key to run an engagement — it stays in "
-                "your browser and is used only for your runs.",
-            )
-        if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} engagements/24h). "
-                "Add your own API key for unlimited engagements.",
-            )
+    if not (config.SERVER_HAS_KEY or config.MOCK_MODE):
+        raise HTTPException(
+            status_code=503,
+            detail="The server is not configured with a Groq API key. "
+            "Set GROQ_API_KEY in the server environment.",
+        )
+    if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} engagements/24h). "
+            "Please try again tomorrow.",
+        )
 
     try:
         engagement_id = db.create_engagement(cid, body.case_prompt)
@@ -98,7 +84,7 @@ async def create_engagement(
         ) from exc
 
     asyncio.create_task(
-        run_engagement(engagement_id, body.case_prompt, api_key=api_key, model=model)
+        run_engagement(engagement_id, body.case_prompt, model=model)
     )
     return {"id": engagement_id, "status": "queued", "phases": [p for p, _ in PHASES]}
 

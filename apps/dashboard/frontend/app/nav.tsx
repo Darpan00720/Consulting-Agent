@@ -36,7 +36,6 @@ export function NavBar() {
         <Link href="/engagements">Engagements</Link>
         <Link href="/benchmark">Benchmark</Link>
         <Link href="/lessons">Lessons</Link>
-        <Link href="/settings">API key</Link>
       </div>
     </nav>
   );

@@ -238,7 +238,7 @@ export default function BenchmarkPage() {
         </div>
         <p className="muted" style={{ fontSize: ".8rem", marginTop: ".5rem" }}>
           Tip: benchmark on Haiku while iterating (~5× cheaper); the grader
-          always runs on Haiku. Your API key stays in your browser.
+          always runs on Haiku. No API key needed.
         </p>
       </form>
 

@@ -1,7 +1,6 @@
-// Thin client for the dashboard API. No accounts:
-//  - identity = anonymous per-browser id (localStorage, sent as X-Client-Id)
-//  - the user's Anthropic API key lives ONLY in localStorage and is sent
-//    per-request when running an engagement; the server never stores it.
+// Thin client for the dashboard API. No accounts, no API keys.
+//  - Identity = anonymous per-browser id (localStorage, sent as X-Client-Id)
+//  - The server holds the Anthropic API key; users need no key to run cases.
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -14,19 +13,6 @@ export function clientId(): string {
     localStorage.setItem("stratagent_client_id", id);
   }
   return id;
-}
-
-export function getApiKey(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("stratagent_api_key");
-}
-
-export function setApiKey(key: string) {
-  localStorage.setItem("stratagent_api_key", key);
-}
-
-export function clearApiKey() {
-  localStorage.removeItem("stratagent_api_key");
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -123,7 +109,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({
           case_prompt: casePrompt,
-          api_key: getApiKey() ?? undefined,
           model: model || undefined,
         }),
       },
@@ -149,7 +134,6 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({
-          api_key: getApiKey() ?? undefined,
           model: model || undefined,
         }),
       },
