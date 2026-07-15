@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import config, db
 from app.pipeline.engine import recover_interrupted
-from app.routers import cases, engagements, lessons
+from app.routers import admin, engagements
 
 
 @asynccontextmanager
@@ -47,8 +47,12 @@ app.add_middleware(
 )
 
 app.include_router(engagements.router)
-app.include_router(lessons.router)
-app.include_router(cases.router)
+# The public Benchmark and Lessons surfaces were removed: every engagement now
+# feeds the learning loop automatically (reflection runs after EVERY run), so
+# there was nothing for a user to do there. Lessons are visible to the operator
+# via /api/admin/lessons. The `cases`/`evals` tables remain for the golden-case
+# harness; they are simply not exposed to end users any more.
+app.include_router(admin.router)
 
 
 @app.get("/api/health")

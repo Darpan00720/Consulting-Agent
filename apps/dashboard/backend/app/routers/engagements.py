@@ -168,6 +168,42 @@ def get_engagement(engagement_id: str, cid: str = Depends(client_id)) -> dict[st
     return engagement
 
 
+class FeedbackRequest(BaseModel):
+    # Long enough for a real explanation of what the analysis got wrong — that
+    # detail is the whole point of collecting it.
+    comment: str = Field(min_length=1, max_length=4000)
+    rating: str | None = None
+
+    @field_validator("rating")
+    @classmethod
+    def _validate_rating(cls, value: str | None) -> str | None:
+        if value not in (None, "helpful", "not_helpful"):
+            raise ValueError("rating must be 'helpful' or 'not_helpful'")
+        return value
+
+
+@router.post("/{engagement_id}/feedback", status_code=201)
+def add_feedback(
+    engagement_id: str, body: FeedbackRequest, cid: str = Depends(client_id)
+) -> dict[str, Any]:
+    """Record a reader's comment on their own report.
+
+    Ownership is enforced via _owned_engagement: you can only annotate an
+    engagement you ran, so this can't be used to write into someone else's.
+    """
+    _owned_engagement(engagement_id, cid)
+    feedback_id = db.add_feedback(engagement_id, cid, body.comment.strip(), body.rating)
+    return {"id": feedback_id, "status": "recorded"}
+
+
+@router.get("/{engagement_id}/feedback")
+def list_feedback(
+    engagement_id: str, cid: str = Depends(client_id)
+) -> list[dict[str, Any]]:
+    _owned_engagement(engagement_id, cid)
+    return db.list_feedback(engagement_id)
+
+
 @router.get("/{engagement_id}/events")
 async def stream_events(
     engagement_id: str, cid: str = Depends(client_id)

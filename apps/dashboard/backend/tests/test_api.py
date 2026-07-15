@@ -202,8 +202,9 @@ def test_telemetry_feeds_the_cores_quality_analytics(tmp_path, monkeypatch):
     just well-formed. quality_analytics() computes reviewer_pass_rate from
     metadata['verdict'] on terminal REVIEW events — pin that contract, since a
     silent break turns the ops dashboard into zeros that look like health."""
-    from app import telemetry_bridge
     from telemetry import JSONLSink, quality_analytics
+
+    from app import telemetry_bridge
 
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "qual.db")
     monkeypatch.setattr(config, "TELEMETRY_ENABLED", True)
@@ -705,6 +706,158 @@ def test_pasted_images_never_persisted(client, tmp_path):
     assert marker.encode() not in raw
 
 
+def test_feedback_roundtrip_and_isolation(client):
+    """A reader can comment on their own report; nobody else can write to it.
+
+    Feedback is the only channel through which a real user tells us the analysis
+    was wrong, so it is stored verbatim.
+    """
+    eid = client.post(
+        "/api/engagements", json={"case_prompt": CASE}, headers=CID_A
+    ).json()["id"]
+
+    posted = client.post(
+        f"/api/engagements/{eid}/feedback",
+        json={
+            "comment": "A24 says the downside is €900k but the whole project "
+            "costs €17k — the risk numbers never met the model.",
+            "rating": "not_helpful",
+        },
+        headers=CID_A,
+    )
+    assert posted.status_code == 201
+
+    listed = client.get(f"/api/engagements/{eid}/feedback", headers=CID_A).json()
+    assert len(listed) == 1
+    assert "A24" in listed[0]["comment"] and listed[0]["rating"] == "not_helpful"
+
+    # another browser can neither read nor write this engagement's feedback
+    assert (
+        client.get(f"/api/engagements/{eid}/feedback", headers=CID_B).status_code == 404
+    )
+    assert (
+        client.post(
+            f"/api/engagements/{eid}/feedback",
+            json={"comment": "injected"},
+            headers=CID_B,
+        ).status_code
+        == 404
+    )
+
+    # a comment is never gated behind picking a rating
+    assert (
+        client.post(
+            f"/api/engagements/{eid}/feedback",
+            json={"comment": "no rating supplied"},
+            headers=CID_A,
+        ).status_code
+        == 201
+    )
+    # but a bogus rating is rejected
+    assert (
+        client.post(
+            f"/api/engagements/{eid}/feedback",
+            json={"comment": "x", "rating": "amazing"},
+            headers=CID_A,
+        ).status_code
+        == 422
+    )
+
+
+def test_admin_requires_token_and_404s_when_unconfigured(client, monkeypatch):
+    """The operator console exposes every client's data. With no token
+    configured the routes must not exist at all; with a wrong token they must
+    look identical to a probe."""
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "")
+    assert client.get("/api/admin/overview").status_code == 404
+
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret-operator-token")
+    assert client.get("/api/admin/overview").status_code == 404  # no token
+    assert (
+        client.get(
+            "/api/admin/overview", headers={"X-Admin-Token": "wrong"}
+        ).status_code
+        == 404
+    )  # wrong token → 404, not 403: reveal nothing
+    ok = client.get(
+        "/api/admin/overview", headers={"X-Admin-Token": "s3cret-operator-token"}
+    )
+    assert ok.status_code == 200
+
+
+def test_admin_sees_all_clients_and_answers_the_operator_questions(client, monkeypatch):
+    """Is it working, for whom, and where does it break?"""
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "tok")
+    hdr = {"X-Admin-Token": "tok"}
+
+    a = client.post(
+        "/api/engagements", json={"case_prompt": CASE}, headers=CID_A
+    ).json()["id"]
+    client.post("/api/engagements", json={"case_prompt": CASE}, headers=CID_B)
+    client.post(
+        f"/api/engagements/{a}/feedback",
+        json={"comment": "conversion assumption looks 2x too high"},
+        headers=CID_A,
+    )
+
+    overview = client.get("/api/admin/overview", headers=hdr).json()
+    assert overview["total"] == 2
+    assert overview["users"] == 2  # how many people used it
+    assert overview["free_runs"] == 2  # free vs BYOK split
+    assert overview["byok_runs"] == 0
+    assert overview["feedback_count"] == 1
+
+    rows = client.get("/api/admin/engagements", headers=hdr).json()
+    assert {r["client_id"] for r in rows} == {"browser-aaaa-1111", "browser-bbbb-2222"}
+    mine = next(r for r in rows if r["id"] == a)
+    assert mine["feedback"][0]["comment"].startswith("conversion")
+    assert "failed_at" in mine and "phases_completed" in mine
+
+
+def test_admin_reports_the_failing_step(tmp_path, monkeypatch):
+    """'At what step is it failing' — derived from the event log, so it works
+    for runs that failed before this view existed."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "fail.db")
+    db.reset_for_tests()
+
+    async def die_at_issue_tree(agent, system, user, **kw):
+        if agent == "issue-tree-generator":
+            raise RuntimeError("provider exploded")
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=die_at_issue_tree))
+
+    row = next(r for r in db.admin_engagements() if r["id"] == eid)
+    assert row["status"] == "failed"
+    assert row["failed_at"] == "issue_tree", f"wrong failing step: {row['failed_at']}"
+    assert row["phases_completed"] == 4  # classify..framing landed before the break
+    db.reset_for_tests()
+
+
+def test_byok_run_is_visible_to_admin_without_storing_the_key(client, monkeypatch):
+    """Admin can answer 'who used their own key' — from a boolean, never a key."""
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "tok")
+    client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "api_key": "sk-ant-never-stored-anywhere"},
+        headers=CID_A,
+    )
+    overview = client.get(
+        "/api/admin/overview", headers={"X-Admin-Token": "tok"}
+    ).json()
+    assert overview["byok_runs"] == 1 and overview["free_runs"] == 0
+    raw = config.DB_PATH.read_bytes()
+    assert b"never-stored-anywhere" not in raw
+
+
+def test_public_benchmark_and_lessons_routes_are_gone(client):
+    """Removed for everyone: every engagement now feeds the learning loop
+    automatically, so there was nothing for a user to do on those pages."""
+    assert client.get("/api/cases", headers=CID_A).status_code == 404
+    assert client.get("/api/lessons", headers=CID_A).status_code == 404
+
+
 def test_free_tier_quota(client):
     """After DAILY_ENGAGEMENT_QUOTA runs, the next one is rate-limited."""
     for _ in range(3):
@@ -793,28 +946,6 @@ RUBRIC = (
 )
 
 
-def test_case_crud_and_isolation(client):
-    created = client.post(
-        "/api/cases",
-        json={"title": "GlobaPharm", "prompt": CASE, "rubric": RUBRIC},
-        headers=CID_A,
-    )
-    assert created.status_code == 201
-    case_id = created.json()["id"]
-
-    listed = client.get("/api/cases", headers=CID_A).json()
-    assert [c["id"] for c in listed] == [case_id]
-    assert listed[0]["eval_count"] == 0 and listed[0]["latest_score"] is None
-
-    # another browser can't see, fetch, or delete it
-    assert client.get("/api/cases", headers=CID_B).json() == []
-    assert client.get(f"/api/cases/{case_id}", headers=CID_B).status_code == 404
-    assert client.delete(f"/api/cases/{case_id}", headers=CID_B).status_code == 404
-
-    assert client.delete(f"/api/cases/{case_id}", headers=CID_A).status_code == 204
-    assert client.get("/api/cases", headers=CID_A).json() == []
-
-
 def test_eval_grades_report_and_learns_lessons(tmp_path, monkeypatch):
     """The full golden-case loop: run engagement → grade vs the model answer →
     store the score → distil MISSED items into durable lessons."""
@@ -881,28 +1012,6 @@ def test_eval_failed_engagement_marks_eval_failed(tmp_path, monkeypatch):
     assert evals[0]["status"] == "failed"
     assert evals[0]["detail"]  # a human-readable reason, not empty
     db.reset_for_tests()
-
-
-def test_run_eval_endpoint_mock(client):
-    """The API path works end to end in mock mode (no key needed)."""
-    case_id = client.post(
-        "/api/cases",
-        json={"title": "Mock case", "prompt": CASE, "rubric": RUBRIC},
-        headers=CID_A,
-    ).json()["id"]
-
-    run = client.post(f"/api/cases/{case_id}/run", json={}, headers=CID_A)
-    assert run.status_code == 202
-    body = run.json()
-    assert body["eval_id"] and body["engagement_id"]
-
-    for _ in range(200):
-        evals = client.get(f"/api/cases/{case_id}/evals", headers=CID_A).json()
-        if evals and evals[0]["status"] != "running":
-            break
-    # the mock grader returns a parseable demo grade so the loop is visible
-    assert evals[0]["status"] == "completed"
-    assert evals[0]["score"] == 62
 
 
 def test_parse_grade():

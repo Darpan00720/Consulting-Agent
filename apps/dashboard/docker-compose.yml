@@ -23,6 +23,8 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
       GITHUB_MODELS_MODEL: ${GITHUB_MODELS_MODEL:-}
       CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-}
+      # Operator console gate. Unset => /api/admin/* 404s entirely.
+      STRATAGENT_ADMIN_TOKEN: ${STRATAGENT_ADMIN_TOKEN:-}
       # Zero-setup demo path: `STRATAGENT_MOCK=1 docker compose up` runs the
       # whole pipeline with canned outputs and needs no API key. Must be
       # forwarded explicitly — compose does not pass the host env through.

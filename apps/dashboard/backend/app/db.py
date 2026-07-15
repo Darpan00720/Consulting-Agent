@@ -38,6 +38,21 @@ CREATE TABLE IF NOT EXISTS engagements (
     completed_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_engagements_client ON engagements(client_id, created_at);
+-- Reader feedback on a delivered report. This is the only channel through which
+-- a real user tells us the analysis was wrong, so it is stored verbatim and
+-- never summarised away. Multiple notes per engagement are allowed (someone may
+-- come back after re-reading).
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    engagement_id TEXT NOT NULL REFERENCES engagements(id),
+    client_id TEXT NOT NULL,
+    -- 'helpful' | 'not_helpful' | NULL — a one-click signal, optional so a
+    -- comment is never gated behind picking a rating.
+    rating TEXT,
+    comment TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_engagement ON feedback(engagement_id);
 CREATE TABLE IF NOT EXISTS events (
     engagement_id TEXT NOT NULL REFERENCES engagements(id),
     seq INTEGER NOT NULL,
@@ -202,6 +217,133 @@ def list_engagements(client_id: str) -> list[dict[str, Any]]:
             )
             .fetchall()
         )
+    return [dict(r) for r in rows]
+
+
+# --- feedback ---------------------------------------------------------------
+
+
+def add_feedback(
+    engagement_id: str, client_id: str, comment: str, rating: str | None = None
+) -> int:
+    with _lock:
+        conn = connect()
+        cur = conn.execute(
+            "INSERT INTO feedback (engagement_id, client_id, rating, comment,"
+            " created_at) VALUES (?,?,?,?,?)",
+            (engagement_id, client_id, rating, comment, time.time()),
+        )
+        conn.commit()
+    return int(cur.lastrowid or 0)
+
+
+def list_feedback(engagement_id: str) -> list[dict[str, Any]]:
+    with _lock:
+        rows = (
+            connect()
+            .execute(
+                "SELECT id, rating, comment, created_at FROM feedback"
+                " WHERE engagement_id = ? ORDER BY created_at",
+                (engagement_id,),
+            )
+            .fetchall()
+        )
+    return [dict(r) for r in rows]
+
+
+# --- admin (operator-only; see routers/admin.py) -----------------------------
+
+
+def admin_overview() -> dict[str, Any]:
+    """Fleet-wide counters for the operator view.
+
+    `used_byok` records only THAT a user brought a key, never the key — so free
+    vs BYOK is answerable without ever having stored credentials.
+    """
+    with _lock:
+        conn = connect()
+        row = conn.execute("""
+            SELECT
+              COUNT(*)                                            AS total,
+              COUNT(DISTINCT client_id)                           AS users,
+              SUM(status = 'completed')                           AS completed,
+              SUM(status = 'failed')                              AS failed,
+              SUM(status IN ('running', 'queued', 'paused'))      AS in_flight,
+              SUM(used_byok = 1)                                  AS byok_runs,
+              SUM(used_byok = 0)                                  AS free_runs,
+              SUM(review_ready = 1)                               AS shipped_final,
+              SUM(status = 'completed' AND review_ready = 0)      AS interim_only
+            FROM engagements
+            """).fetchone()
+        feedback_count = conn.execute("SELECT COUNT(*) AS n FROM feedback").fetchone()
+        lessons_count = conn.execute("SELECT COUNT(*) AS n FROM lessons").fetchone()
+    out = {k: (row[k] or 0) for k in row.keys()}
+    out["feedback_count"] = feedback_count["n"]
+    out["lessons_learned"] = lessons_count["n"]
+    return out
+
+
+def admin_engagements(limit: int = 200) -> list[dict[str, Any]]:
+    """Every engagement across all clients, with feedback attached.
+
+    `failed_at` answers "which step is breaking?" — the last phase that started
+    without completing. Derived from the event log rather than stored, so it
+    stays correct for runs that failed before this view existed.
+    """
+    with _lock:
+        conn = connect()
+        rows = conn.execute(
+            """
+            SELECT e.id, e.client_id, e.case_prompt, e.status, e.error,
+                   e.review_verdict, e.challenge_verdict, e.review_ready,
+                   e.used_byok, e.created_at, e.completed_at,
+                   (SELECT COUNT(*) FROM feedback f WHERE f.engagement_id = e.id)
+                     AS feedback_count
+            FROM engagements e ORDER BY e.created_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            item = dict(r)
+            started = [
+                json.loads(p)["phase"]
+                for (p,) in conn.execute(
+                    "SELECT payload FROM events WHERE engagement_id = ?"
+                    " AND type = 'phase_started' ORDER BY seq",
+                    (r["id"],),
+                )
+            ]
+            done = [
+                json.loads(p)["phase"]
+                for (p,) in conn.execute(
+                    "SELECT payload FROM events WHERE engagement_id = ?"
+                    " AND type = 'phase_completed' ORDER BY seq",
+                    (r["id"],),
+                )
+            ]
+            unfinished = [p for p in started if p not in done]
+            item["failed_at"] = unfinished[-1] if unfinished else None
+            item["phases_completed"] = len(set(done))
+            item["pauses"] = conn.execute(
+                "SELECT COUNT(*) AS n FROM events WHERE engagement_id = ?"
+                " AND type = 'engagement_paused'",
+                (r["id"],),
+            ).fetchone()["n"]
+            item["feedback"] = list_feedback_unlocked(conn, r["id"])
+            out.append(item)
+    return out
+
+
+def list_feedback_unlocked(
+    conn: sqlite3.Connection, engagement_id: str
+) -> list[dict[str, Any]]:
+    """list_feedback for callers already holding _lock (it is not reentrant)."""
+    rows = conn.execute(
+        "SELECT id, rating, comment, created_at FROM feedback"
+        " WHERE engagement_id = ? ORDER BY created_at",
+        (engagement_id,),
+    ).fetchall()
     return [dict(r) for r in rows]
 
 

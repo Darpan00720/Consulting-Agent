@@ -81,6 +81,13 @@ MAX_REWORK = int(os.environ.get("STRATAGENT_MAX_REWORK", "1"))
 # Useful for demos, local frontend work, and tests.
 MOCK_MODE = os.environ.get("STRATAGENT_MOCK", "") == "1"
 
+# Operator ("admin") console. Exposes EVERY client's cases, feedback and failure
+# traces, so it is gated on a shared secret from the environment. Unset = the
+# routes 404 (not 403): an endpoint that isn't configured shouldn't advertise
+# that it exists. This is deliberately not an account system — there is exactly
+# one operator, and the product's promise is that users never sign up.
+ADMIN_TOKEN = os.environ.get("STRATAGENT_ADMIN_TOKEN", "")
+
 # Operational telemetry (packages/telemetry, wired via app/telemetry_bridge.py).
 # Separate from the domain event log: this is for OPERATORS (durations, retries,
 # failures), is sampled and redacted, and may be dropped without affecting an

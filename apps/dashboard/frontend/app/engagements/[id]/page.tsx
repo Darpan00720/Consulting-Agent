@@ -17,7 +17,6 @@ type PhaseDef = {
   id: string;
   label: string;
   agent: string;
-  blurb: string;
 };
 
 type StageDef = {
@@ -37,31 +36,26 @@ const STAGES: StageDef[] = [
         id: "classify",
         label: "Classify the case",
         agent: "case-classifier",
-        blurb: "Archetype, known facts, and the real question",
       },
       {
         id: "gap_analysis",
         label: "Find the gaps",
         agent: "information-gap",
-        blurb: "Load-bearing unknowns become a labeled assumption ledger",
       },
       {
         id: "planning",
         label: "Plan the engagement",
         agent: "planner",
-        blurb: "Ordered steps, dependencies, analyst assignments",
       },
       {
         id: "framing",
         label: "Select frameworks",
         agent: "framework-selector",
-        blurb: "Primary and supporting frameworks, adapted to this case",
       },
       {
         id: "issue_tree",
         label: "Build the issue tree",
         agent: "issue-tree-generator",
-        blurb: "MECE decomposition into owned, testable sub-questions",
       },
     ],
   },
@@ -74,13 +68,11 @@ const STAGES: StageDef[] = [
         id: "analysis",
         label: "Specialist analysis",
         agent: "5 specialist analysts",
-        blurb: "Financial, market, operations, strategy, and risk",
       },
       {
         id: "reconcile",
         label: "Reconcile findings",
         agent: "engagement-manager",
-        blurb: "Cross-checks numbers and resolves contradictions",
       },
     ],
   },
@@ -93,19 +85,16 @@ const STAGES: StageDef[] = [
         id: "review",
         label: "Independent review",
         agent: "reviewer",
-        blurb: "MECE coverage, traceability, internal consistency",
       },
       {
         id: "challenge",
         label: "Stress-test",
         agent: "challenger",
-        blurb: "The strongest counter-case against the recommendation",
       },
       {
         id: "reporting",
         label: "Executive report",
         agent: "report-writer",
-        blurb: "Board-ready deliverable, every caveat carried through",
       },
     ],
   },
@@ -482,7 +471,6 @@ export default function EngagementPage() {
                                   : ""}
                             </span>
                           </div>
-                          <span className="eng-phase-blurb">{phase.blurb}</span>
                           {phase.id === "analysis" &&
                             (state === "running" ||
                               (state === "pending" && analystsDone > 0)) && (
@@ -586,7 +574,98 @@ export default function EngagementPage() {
           </div>
         </article>
       )}
+
+      {report && <FeedbackPanel engagementId={id} />}
     </div>
+  );
+}
+
+/** Reader feedback on a delivered report.
+ *
+ * This is the only channel through which someone who actually knows the
+ * business tells us the analysis was wrong — so it asks for specifics rather
+ * than a star rating, and it is deliberately placed AFTER the report, where a
+ * reader has just formed an opinion. */
+function FeedbackPanel({ engagementId }: { engagementId: string }) {
+  const [comment, setComment] = useState("");
+  const [rating, setRating] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!comment.trim()) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api.addFeedback(engagementId, comment.trim(), rating ?? undefined);
+      setSent(true);
+    } catch (e) {
+      setError((e as Error).message);
+      setSending(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <section className="feedback-panel sent" aria-live="polite">
+        <strong>Thank you — that&apos;s logged.</strong>
+        <p className="muted">
+          Specific corrections are what make the next engagement better.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="feedback-panel" aria-labelledby="fb-heading">
+      <h2 id="fb-heading">Was this analysis useful?</h2>
+      <p className="muted fb-hint">
+        Tell us what it got wrong, what it missed, or anything that broke. Be
+        specific — &ldquo;the conversion assumption is 2× too high for
+        Brazil&rdquo; is worth more than a rating.
+      </p>
+
+      <div className="fb-ratings" role="group" aria-label="Overall verdict">
+        <button
+          type="button"
+          className={`fb-chip${rating === "helpful" ? " on" : ""}`}
+          onClick={() => setRating(rating === "helpful" ? null : "helpful")}
+          aria-pressed={rating === "helpful"}
+        >
+          Useful
+        </button>
+        <button
+          type="button"
+          className={`fb-chip${rating === "not_helpful" ? " on" : ""}`}
+          onClick={() => setRating(rating === "not_helpful" ? null : "not_helpful")}
+          aria-pressed={rating === "not_helpful"}
+        >
+          Not useful
+        </button>
+        <span className="muted fb-optional">optional</span>
+      </div>
+
+      <label htmlFor="fb-comment" className="sr-only">
+        Your feedback
+      </label>
+      <textarea
+        id="fb-comment"
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="What was wrong, missing, or unclear? Any errors in the numbers? Anything that failed to run?"
+        maxLength={4000}
+      />
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="fb-actions">
+        <button onClick={submit} disabled={sending || !comment.trim()}>
+          {sending ? "Sending…" : "Send feedback"}
+        </button>
+        <span className="muted fb-meta">
+          Goes only to the StratAgent team, with this engagement attached.
+        </span>
+      </div>
+    </section>
   );
 }
 

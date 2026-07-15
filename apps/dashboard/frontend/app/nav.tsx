@@ -32,10 +32,11 @@ export function NavBar() {
         <Logo />
         StratAgent
       </Link>
+      {/* Benchmark and Lessons were removed: every engagement now feeds the
+          learning loop automatically, so there was nothing for a user to do
+          there. Lessons live in the operator console at /admin. */}
       <div className="links">
         <Link href="/engagements">Engagements</Link>
-        <Link href="/benchmark">Benchmark</Link>
-        <Link href="/lessons">Lessons</Link>
       </div>
     </nav>
   );

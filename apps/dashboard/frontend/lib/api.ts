@@ -81,29 +81,70 @@ export interface Lesson {
   created_at: number;
 }
 
-export interface CaseSummary {
-  id: string;
-  title: string;
+export interface Feedback {
+  id: number;
+  rating: string | null;
+  comment: string;
   created_at: number;
-  latest_score: number | null;
-  eval_count: number;
 }
 
-export interface EvalRun {
+export interface AdminOverview {
+  total: number;
+  users: number;
+  completed: number;
+  failed: number;
+  in_flight: number;
+  byok_runs: number;
+  free_runs: number;
+  shipped_final: number;
+  interim_only: number;
+  feedback_count: number;
+  lessons_learned: number;
+}
+
+export interface AdminEngagement {
   id: string;
-  engagement_id: string | null;
-  status: string; // running | completed | failed
-  score: number | null;
-  detail: string | null;
+  client_id: string;
+  case_prompt: string;
+  status: string;
+  error: string | null;
+  review_verdict: string | null;
+  challenge_verdict: string | null;
+  review_ready: number | null;
+  used_byok: number;
   created_at: number;
   completed_at: number | null;
+  failed_at: string | null;
+  phases_completed: number;
+  pauses: number;
+  feedback_count: number;
+  feedback: Feedback[];
 }
 
 export const api = {
   health: () => request<Health>("/api/health"),
-  listLessons: () => request<Lesson[]>("/api/lessons"),
-  deleteLesson: (id: number) =>
-    fetch(`${API_URL}/api/lessons/${id}`, { method: "DELETE" }),
+  addFeedback: (id: string, comment: string, rating?: string) =>
+    request<{ id: number; status: string }>(`/api/engagements/${id}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ comment, rating: rating || undefined }),
+    }),
+  listFeedback: (id: string) =>
+    request<Feedback[]>(`/api/engagements/${id}/feedback`),
+  // Operator console. The token is supplied per call and kept only in the
+  // admin page's own state — never in localStorage, so it can't leak from a
+  // shared browser.
+  adminOverview: (token: string) =>
+    request<AdminOverview>("/api/admin/overview", {
+      headers: { "X-Admin-Token": token },
+    }),
+  adminEngagements: (token: string) =>
+    request<AdminEngagement[]>("/api/admin/engagements", {
+      headers: { "X-Admin-Token": token },
+    }),
+  adminLessons: (token: string) =>
+    request<Lesson[]>("/api/admin/lessons", {
+      headers: { "X-Admin-Token": token },
+    }),
   createEngagement: (casePrompt: string, apiKey?: string, images?: string[]) =>
     request<{ id: string; status: string; phases: string[] }>(
       "/api/engagements",
@@ -117,30 +158,6 @@ export const api = {
       },
     ),
   listEngagements: () => request<EngagementSummary[]>("/api/engagements"),
-  // Golden-case benchmark: {case, official answer} pairs the agent is graded
-  // against — the gaps become lessons, the scores prove improvement.
-  listCases: () => request<CaseSummary[]>("/api/cases"),
-  createCase: (title: string, prompt: string, rubric: string) =>
-    request<{ id: string; title: string }>("/api/cases", {
-      method: "POST",
-      body: JSON.stringify({ title, prompt, rubric }),
-    }),
-  deleteCase: (id: string) =>
-    fetch(`${API_URL}/api/cases/${id}`, {
-      method: "DELETE",
-      headers: { "X-Client-Id": clientId() },
-    }),
-  listEvals: (caseId: string) => request<EvalRun[]>(`/api/cases/${caseId}/evals`),
-  runEval: (caseId: string, model?: string) =>
-    request<{ eval_id: string; engagement_id: string; status: string }>(
-      `/api/cases/${caseId}/run`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          model: model || undefined,
-        }),
-      },
-    ),
   getEngagement: (id: string) => request<Engagement>(`/api/engagements/${id}`),
   // EventSource can't send headers — client id goes in the query string.
   eventsUrl: (id: string) =>
