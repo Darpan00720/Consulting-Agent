@@ -1,4 +1,13 @@
-# StratAgent RC1 — User Guide
+# StratAgent — User Guide
+
+> **Which product is this guide for?** The **Claude Code plugin** (`/solve-case`).
+> If you are using the **web dashboard** (`apps/dashboard/`), the consulting
+> behaviour below is identical — it runs the same 16 agents and the same
+> knowledge vault — but the artifacts stream to your browser instead of landing
+> in `engagements/<slug>/`. For setup, see
+> [`apps/dashboard/README.md`](../../apps/dashboard/README.md);
+> for how the two relate, see
+> [ADR-008](../architecture/ADR-008-Repository-Topology.md).
 
 ## What StratAgent does
 

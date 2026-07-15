@@ -1,7 +1,20 @@
 # StratAgent Developer Guide
 
-Practical reference for contributing to the Python platform under `packages/`.
+Practical reference for contributing to the **reference core** under `packages/`.
 (For using the consulting product, see [USER_GUIDE.md](USER_GUIDE.md).)
+
+> **Read [ADR-008](../architecture/ADR-008-Repository-Topology.md) first — this
+> repo has three artifacts and this guide covers only one of them.**
+>
+> | Changing… | Edit | Tests |
+> |---|---|---|
+> | consulting behaviour (an agent, a framework) | `plugins/ruflo-stratagent/` | both surfaces inherit it |
+> | the **web product** (pipeline, resilience, UI) | `apps/dashboard/` | `cd apps/dashboard/backend && uv run --extra dev pytest` |
+> | the reference core (this guide) | `packages/` | `uv run pytest` |
+>
+> `packages/` is **not** on the dashboard's execution path except for
+> `telemetry` — a change here does not reach the web product. CI
+> (`.github/workflows/ci.yml`) gates all three.
 
 ## Repository layout
 

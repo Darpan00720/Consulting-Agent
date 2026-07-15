@@ -1,15 +1,44 @@
-# StratAgent RC1 — Quick Start
+# StratAgent — Quick Start
 
-**StratAgent** is an AI management-consulting platform built on Claude Code.
-Paste a business problem and it runs a full engagement lifecycle: classify →
-plan → frame → analyze → review → challenge → report.
+**StratAgent** is an AI management-consulting platform. Paste a business problem
+and it runs a full engagement lifecycle: classify → plan → frame → analyze →
+reconcile → review → challenge → report.
 
-## Prerequisites
+It ships in two forms that run **the same 16 agents and the same knowledge
+vault**. Pick whichever fits — the web dashboard needs no Claude Code.
 
-- Claude Code (CLI or desktop app)
-- Python 3.12+ with `uv` (`pip install uv`)
+---
 
-## Option A — Standalone (no install)
+## Option A — Web dashboard (fastest; Docker only)
+
+No API key, no signup, no Claude Code. Mock mode runs the whole lifecycle with
+canned outputs so you can see it work in seconds:
+
+```bash
+cd apps/dashboard
+STRATAGENT_MOCK=1 docker compose up --build     # → http://localhost:3000
+```
+
+For **real** engagements, add at least one free provider key to
+`apps/dashboard/.env` and drop the `STRATAGENT_MOCK=1`:
+
+```bash
+GEMINI_API_KEY=AIza...       # https://aistudio.google.com/apikey  (best free tier)
+CEREBRAS_API_KEY=csk-...     # https://cloud.cerebras.ai           (optional)
+```
+
+Any subset works. A real run takes ~5–7 minutes; if every provider hits its rate
+limit the engagement **pauses and auto-resumes** instead of failing. You can also
+paste your own key (Anthropic / OpenAI / OpenRouter / Cerebras / Groq / Google)
+into the UI — used for that run only, never stored.
+
+Full options: [`apps/dashboard/README.md`](../../apps/dashboard/README.md).
+
+---
+
+## Option B — Claude Code, standalone (no install)
+
+Prerequisites: Claude Code (CLI or desktop) and Python 3.12+ with `uv`.
 
 1. Clone or open this repository in Claude Code.
 2. Run `uv sync` once to install Python dependencies.
@@ -23,13 +52,16 @@ flat but costs have spiked. The board wants a diagnosis and a plan.
 The orchestrator will run all phases and write the report to
 `engagements/<slug>/report.md`.
 
-## Option B — Plugin install (full Ruflo harness)
+## Option C — Plugin install (full Ruflo harness)
 
 ```bash
 /plugin marketplace add .
 /plugin install ruflo-stratagent@stratagent
 /solve-case <your problem>
 ```
+
+> Options B and C produce the per-phase files listed below. **Option A** keeps
+> the same artifacts in its database and streams them to the browser instead.
 
 ## What you get
 
@@ -65,29 +97,45 @@ The report is only generated after both governance gates clear:
 - Reviewer: `approved`
 - Challenger: `stands` or `stands_with_caveats`
 
-If challenger says `needs_rework`, the engagement halts and tells you what to fix.
+If a gate does not clear, StratAgent **does not ship a recommendation**. You get
+an honest interim status report, clearly flagged as not final, listing exactly
+what must be reconciled. That refusal is the design, not a failure.
 
 ## Next steps
 
 - See [USER_GUIDE.md](USER_GUIDE.md) for complete workflow documentation.
-- See the [RC1 Release Notes](../reviews/RC1-Release-Notes.md) for what's
-  included in this release.
+- See the [CHANGELOG](../../CHANGELOG.md) for what's in the current release.
+- See [ADR-008](../architecture/ADR-008-Repository-Topology.md) if you plan to
+  contribute — it says which of the repo's three artifacts to edit.
 
 ## Observability (optional)
 
-Every engagement can emit an operational telemetry trace (durations, tokens,
-retries, governance verdicts) — separate from the report, correlated by
-`engagement_id`. It writes `telemetry/<engagement_id>.jsonl`.
+Every engagement can emit an operational telemetry trace (durations, retries,
+governance verdicts) — separate from the report, correlated by `engagement_id`.
+One JSONL file per engagement.
+
+**The dashboard emits this automatically** (since 1.0.0-beta.1) to
+`$STRATAGENT_TELEMETRY_DIR`, which defaults to a `telemetry/` directory beside
+its database — inside Docker that is `/app/data/telemetry/`. Copy it out and
+point the same CLI at it with `--root`:
 
 ```bash
 # summarize one engagement (durations by phase, confidence, frameworks)
-uv run python scripts/engagement_telemetry.py --engagement <engagement_id>
+uv run python scripts/engagement_telemetry.py --engagement <engagement_id> --root <dir>
 
-# quality metrics across all engagements (reviewer pass rate, challenger intervention…)
-uv run python scripts/engagement_telemetry.py --all --quality
+# quality metrics across engagements (reviewer pass rate, challenger intervention…)
+uv run python scripts/engagement_telemetry.py --all --quality --root <dir>
 
 # see worked sample traces from the three pilots
 uv run python scripts/replay_pilots.py   # → docs/observability/samples/
+```
+
+Real output from a dashboard run — this is what tells you where time actually
+goes (review was nearly as expensive as all five analysts):
+
+```json
+"duration_by_phase_ms": { "analysis": 78462, "review": 67923, "planning": 11538 },
+"reviewer_pass_rate": 1.0, "validation_block_rate": 0.5
 ```
 
 Full design: [docs/observability/](../observability/Telemetry-Architecture.md).

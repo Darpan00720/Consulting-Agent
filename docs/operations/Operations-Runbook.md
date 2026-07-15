@@ -4,8 +4,16 @@
 StratAgent with no prior project knowledge.
 **Read after:** the repo [README](../../plugins/ruflo-stratagent/README.md) and
 [CLAUDE.md](../../CLAUDE.md). This runbook is the canonical operational manual.
-**Version at time of writing:** `0.1.0-rc2` (RC1.2). **Maturity:** *Ready for
-Limited Beta* (see [Research Evaluation](../reviews/v1.0-Research-Evaluation.md)).
+**Version at time of writing:** `1.0.0-beta.1`. **Maturity:** *Ready for Limited
+Beta* (see [Research Evaluation](../reviews/v1.0-Research-Evaluation.md)).
+
+> **Scope note.** StratAgent ships as **three artifacts** with different
+> operational profiles — see
+> [ADR-008](../architecture/ADR-008-Repository-Topology.md). This runbook was
+> written for the **Claude Code plugin + reference core**, which have no server.
+> The **web dashboard** (`apps/dashboard/`) *is* a deployed service; its
+> deployment, configuration, and failure modes are in §3.7 and
+> [`apps/dashboard/README.md`](../../apps/dashboard/README.md).
 
 This document **cross-references** the ADRs and design docs rather than
 duplicating them. When a section says "see ADR-00X", that ADR is the source of
@@ -195,8 +203,12 @@ Two distinct "replay" concepts — do not confuse them:
 
 ## 3. Deployment
 
-> There is **no server**. StratAgent runs inside Claude Code (as a plugin or
+> **The plugin has no server.** It runs inside Claude Code (as a plugin or
 > standalone) plus a `uv`-managed Python environment for the deterministic layer.
+> §3.1–3.4 cover that path.
+>
+> **The web dashboard is a deployed service** (FastAPI + Next.js + SQLite) —
+> see **§3.7**.
 
 ### 3.1 Dependencies
 - **Python ≥ 3.12** and **[uv](https://docs.astral.sh/uv/)** (package/venv manager).
@@ -262,12 +274,70 @@ There is no long-running process. "Startup" = environment readiness:
 ```bash
 uv run ruff check packages tests scripts     # lint            → "All checks passed!"
 uv run black --check packages tests scripts   # format          → all files unchanged
-uv run mypy                                    # types (strict)  → Success, 90 files
+uv run mypy packages                           # types (strict)  → Success, 84 files
 uv run pytest -q                               # tests           → 954 passed
 uv run python scripts/replay_pilots.py         # telemetry smoke → writes 3 sample traces
 ```
 All green ⇒ the deterministic layer is healthy. The LLM layer is verified by
 running an actual `/solve-case` engagement (see [§4.1](#41-running-engagements)).
+
+### 3.7 Deploying the web dashboard (`apps/dashboard/`)
+
+Unlike the plugin, this **is** a service: FastAPI (`:8000`) + Next.js (`:3000`)
++ SQLite, deployed with docker-compose.
+
+```bash
+cd apps/dashboard
+docker compose up -d --build          # real mode; reads apps/dashboard/.env
+STRATAGENT_MOCK=1 docker compose up   # canned outputs, needs no API key
+curl -s localhost:8000/api/health     # {"ok":true,...,"free_tier":true}
+```
+
+**Provider keys** live in `apps/dashboard/.env` (git-ignored) — never in a
+tracked file. Any subset works; the chain is Gemini → Cerebras → OpenRouter →
+GitHub Models → Cloudflare with automatic failover. Several keys per provider
+may be comma-separated, **but only if they bill to different projects/orgs** —
+keys sharing a quota bucket cause 429 churn rather than adding capacity. Full
+table: [`apps/dashboard/README.md`](../../apps/dashboard/README.md).
+
+**State.** SQLite at `/app/data/dashboard.db`, on the `backend_data` volume.
+`STRATAGENT_DB` **must** point inside that volume or a redeploy silently
+destroys all engagement history. Schema changes apply in place via
+`db._migrate()`.
+
+**Restart behaviour.** On startup the engine adopts engagements left `running`
+or `paused`: free-tier runs resume from their event checkpoint; BYOK runs are
+closed with an honest error (the user's key is never stored, so they cannot be
+resumed). Assumes **one process owns the database** — adding `--workers N`
+would make every worker adopt the same engagements. Gate behind leader election
+before scaling out.
+
+**Rate limits are not incidents.** When every provider is exhausted an
+engagement pauses, shows a countdown, and auto-resumes from its last completed
+step (exponential backoff, jittered, `STRATAGENT_MAX_AUTO_RESUMES` attempts).
+Users see a delay, not a failure. **Alert on pause *rate*, not on pauses.**
+
+**Observability.** One JSONL trace per engagement under
+`STRATAGENT_TELEMETRY_DIR` (default `/app/data/telemetry/`). Read with the
+core's CLI:
+
+```bash
+docker cp dashboard-backend-1:/app/data/telemetry/. /tmp/tel/
+uv run python scripts/engagement_telemetry.py --all --root /tmp/tel            # durations by phase
+uv run python scripts/engagement_telemetry.py --all --root /tmp/tel --quality  # gate pass rates
+```
+
+**Verification**
+
+```bash
+cd apps/dashboard/backend && uv run --extra dev pytest -q   # 67 passed (mock mode)
+```
+
+**Known operational limits (accepted for beta):**
+- `X-Client-Id` is caller-asserted, so the daily quota is a courtesy limit, not
+  an abuse control. Front with IP rate limiting for a public deployment.
+- Single SQLite writer + `STRATAGENT_MAX_CONCURRENT` (default 8) bound
+  concurrency. Validated at n=1 concurrent user; not load-tested.
 
 ---
 
