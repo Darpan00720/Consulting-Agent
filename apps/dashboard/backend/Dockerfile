@@ -2,8 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install uv
-RUN pip install uv
+# uv for dependency management; gosu to drop root in the entrypoint (see below).
+RUN pip install uv \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files first for layer caching
 COPY apps/dashboard/backend/pyproject.toml apps/dashboard/backend/uv.lock* ./
@@ -29,16 +32,21 @@ COPY knowledge-vault /vault
 COPY packages ./packages
 ENV PYTHONPATH=/app/packages
 
-# SQLite lives here and is backed by a named volume (see docker-compose.yml).
-# The directory must exist in the image AND be owned by the runtime user: a
-# fresh named volume inherits ownership from the image path it covers, so
-# without this the volume mounts as root and the non-root app cannot open the DB.
+# SQLite lives here, backed by a volume (docker-compose.yml, or a PaaS disk).
+# Creating it in the image is what lets a plain Docker NAMED volume inherit the
+# right ownership. A managed platform's disk does NOT inherit it — that case is
+# handled at runtime by docker-entrypoint.sh.
 RUN mkdir -p /app/data
 
-# Non-root user
+COPY apps/dashboard/backend/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# The non-root user the app actually runs as. NOTE: no `USER app` here — the
+# entrypoint starts as root purely to chown the volume mount, then drops to this
+# user via gosu. Setting USER here would make that impossible and the app would
+# crash on a root-owned PaaS disk.
 RUN useradd -m app && chown -R app /app /agents /vault
-USER app
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
