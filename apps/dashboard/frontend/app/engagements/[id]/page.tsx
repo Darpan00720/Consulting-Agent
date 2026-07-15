@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, type Engagement, type EngagementEvent } from "@/lib/api";
 
+
 // ---------------------------------------------------------------------------
 // Engagement lifecycle model — mirrored from the backend PHASES list, grouped
 // into the three acts of a real consulting engagement so the timeline reads
@@ -182,7 +183,18 @@ export default function EngagementPage() {
   const [paused, setPaused] = useState<Paused | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // Mock mode produces a run that LOOKS governed — green reviewer/challenger
+  // badges and all. Only the report body admits it is canned, which is easy to
+  // miss. Surface it unmistakably rather than let a demo pass for analysis.
+  const [isMock, setIsMock] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    api
+      .health()
+      .then((h) => setIsMock(h.mock))
+      .catch(() => {});
+  }, []);
 
   // Live countdown while paused — recomputed from the wall-clock resume time
   // so it survives tab-switches and never drifts.
@@ -331,6 +343,16 @@ export default function EngagementPage() {
   return (
     <div className="engagement-page">
       {/* ------------------------------------------------ header ---------- */}
+      {isMock && (
+        <div className="demo-banner" role="status">
+          <strong>Demo mode — this is not real analysis.</strong> The server is
+          running with <code>STRATAGENT_MOCK=1</code>, so no AI model was
+          called and every output below (including the governance verdicts) is
+          canned placeholder text. Add a provider API key and restart without
+          the mock flag to run a real engagement.
+        </div>
+      )}
+
       <header className="eng-hero">
         <div className="eng-hero-top">
           <span className="eng-badge">

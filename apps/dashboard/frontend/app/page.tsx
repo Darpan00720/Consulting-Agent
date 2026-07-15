@@ -199,6 +199,14 @@ export default function Home() {
       </section>
 
       <section className="panel" aria-labelledby="case-heading">
+        {health?.mock && (
+          <div className="demo-banner" role="status">
+            <strong>Demo mode — output will not be real analysis.</strong> The
+            server is running with <code>STRATAGENT_MOCK=1</code>: no AI model
+            is called and every engagement returns canned placeholder text. Add
+            a provider API key and restart without the mock flag for real runs.
+          </div>
+        )}
         <h2 id="case-heading">Describe the business problem</h2>
         <p className="muted panel-hint">
           Write it as you would brief a consultant: the company, the numbers
