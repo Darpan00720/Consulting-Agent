@@ -14,6 +14,8 @@ subscribers via the in-memory bus.
 from __future__ import annotations
 
 import asyncio
+import logging
+import random
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -23,28 +25,74 @@ from app import config, db
 from app.events import bus
 from app.pipeline import prompts
 from app.pipeline.claude import call_agent, friendly_error
+from app.pipeline.providers import AllProvidersRateLimitedError
+
+log = logging.getLogger(__name__)
 
 CallAgent = Callable[..., Awaitable[str]]
+
+
+def _completed_phase_outputs(engagement_id: str) -> dict[str, str]:
+    """Reconstruct each completed phase's output from persisted events.
+
+    ``phase_completed`` events already carry the phase output, so a resumed
+    run can skip finished phases instead of re-calling the model — the
+    checkpoint that makes auto-resume-after-rate-limit lose no work.
+    """
+    out: dict[str, str] = {}
+    for event in db.list_events(engagement_id):
+        if event["type"] == "phase_completed":
+            payload = event["payload"]
+            if "output" in payload:
+                out[payload["phase"]] = payload["output"]
+    return out
+
+
+def _completed_analyst_outputs(engagement_id: str) -> dict[str, str]:
+    """Reconstruct individual analyst outputs from persisted events.
+
+    The five analysts run sequentially with a 65 s throttle between them — the
+    slowest stretch and the likeliest place to exhaust a rate limit. Caching
+    each one means a resume re-runs only the analysts that hadn't finished.
+    """
+    out: dict[str, str] = {}
+    for event in db.list_events(engagement_id):
+        if event["type"] == "analyst_completed":
+            payload = event["payload"]
+            if payload.get("output") is not None:
+                out[payload["agent"]] = payload["output"]
+    return out
 
 
 def _reviewer_verdict(text: str) -> str:
     """Extract 'approved' | 'needs_rework' from the reviewer's markdown.
 
-    Prefers a verdict-context match; falls back to a bare token; defaults to
-    'approved' when neither is present so a parse failure never blocks forever.
+    Prefers a verdict-context match; falls back to a bare token; **fails
+    closed** — an unparseable reviewer response defaults to 'needs_rework', not
+    'approved'. A gate whose verdict cannot be read has NOT been shown to pass,
+    and this platform's whole premise is refusing to ship unverified analysis
+    (ADR-006). This never hangs: the rework loop is bounded by MAX_REWORK, after
+    which the report-writer produces an honest interim memo (review_ready=False)
+    rather than a report falsely claiming the gate cleared.
     """
     low = text.lower()
     m = re.search(r"verdict[^\n]{0,40}?(needs[_ ]rework|approved)", low)
     if m:
         return "needs_rework" if "rework" in m.group(1) else "approved"
-    if re.search(r"needs[_ ]rework", low):
-        return "needs_rework"
-    return "approved"
+    if re.search(r"\bapproved\b", low) and not re.search(r"needs[_ ]rework", low):
+        return "approved"
+    return "needs_rework"
 
 
 def _challenger_verdict(text: str) -> str:
     """Extract 'stands' | 'stands_with_caveats' | 'needs_rework' (order matters
-    since 'stands_with_caveats' contains 'stands'). Defaults permissively."""
+    since 'stands_with_caveats' contains 'stands').
+
+    **Fails closed**: an unparseable challenger response defaults to
+    'needs_rework', which makes review_ready False and yields an honest interim
+    memo. Same reasoning as the reviewer — an unreadable stress-test verdict is
+    not evidence the recommendation survived attack.
+    """
     low = text.lower()
     m = re.search(
         r"verdict[^\n]{0,40}?(needs[_ ]rework|stands[_ ]with[_ ]caveats|stands)", low
@@ -58,12 +106,13 @@ def _challenger_verdict(text: str) -> str:
         elif "stands" in low:
             token = "stands"
     if token is None:
-        return "stands_with_caveats"
+        return "needs_rework"
     if "rework" in token:
         return "needs_rework"
     if "caveat" in token:
         return "stands_with_caveats"
     return "stands"
+
 
 ANALYSTS = [
     "financial-analyst",
@@ -222,10 +271,26 @@ def _parse_lessons(text: str) -> list[str]:
     for line in text.splitlines():
         line = line.strip()
         if line.upper().startswith("LESSON:"):
-            lesson = line[len("LESSON:"):].strip()
+            lesson = line[len("LESSON:") :].strip()
             if lesson and lesson.upper() != "NONE":
                 out.append(lesson[:400])
     return out
+
+
+_engagement_semaphore: asyncio.Semaphore | None = None
+
+
+def _engagement_slot() -> asyncio.Semaphore:
+    """Server-wide cap on concurrently-running engagements (lazy singleton).
+
+    Created on first use so it binds to the running event loop. Bounds load on
+    the single SQLite writer and the shared provider quota; work beyond the cap
+    waits its turn instead of piling on unbounded.
+    """
+    global _engagement_semaphore
+    if _engagement_semaphore is None:
+        _engagement_semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_ENGAGEMENTS)
+    return _engagement_semaphore
 
 
 async def run_engagement(
@@ -235,14 +300,65 @@ async def run_engagement(
     call: CallAgent = call_agent,
     api_key: str | None = None,
     model: str | None = None,
+    images: list[str] | None = None,
+    resume_count: int = 0,
+) -> None:
+    """Run one full engagement under the concurrency cap.
+
+    Thin wrapper over :func:`_run_engagement` that holds one engagement slot for
+    the duration. A paused engagement releases its slot while it waits (the
+    resume re-invokes this and re-acquires), so slow rate-limited runs don't
+    block fresh ones.
+    """
+    async with _engagement_slot():
+        await _run_engagement(
+            engagement_id,
+            case_prompt,
+            call=call,
+            api_key=api_key,
+            model=model,
+            images=images,
+            resume_count=resume_count,
+        )
+
+
+async def _run_engagement(
+    engagement_id: str,
+    case_prompt: str,
+    *,
+    call: CallAgent = call_agent,
+    api_key: str | None = None,
+    model: str | None = None,
+    images: list[str] | None = None,
+    resume_count: int = 0,
 ) -> None:
     """Run one full engagement. Persists status/report and emits events.
 
     ``api_key`` is the user's own key (BYOK); ``None`` uses server credentials.
     ``model`` overrides the default Claude model for every agent call.
+    ``images`` are pasted charts/graphs passed to vision-capable providers.
+
+    Resumable: if every provider is rate-limited mid-run the engagement is
+    paused and re-invoked later with the same arguments. Completed phases and
+    analysts are reconstructed from persisted events and skipped, so a resume
+    picks up exactly where it left off. ``resume_count`` bounds the retries.
     """
+    # Checkpoints reconstructed from persisted events (empty on a fresh run).
+    done: dict[str, str] = _completed_phase_outputs(engagement_id)
+    analyst_cache: dict[str, str] = _completed_analyst_outputs(engagement_id)
+    resuming = bool(done or analyst_cache)
+
     db.set_engagement_status(engagement_id, "running")
-    await _emit(engagement_id, "engagement_started", {"phases": [p for p, _ in PHASES]})
+    if resuming:
+        await _emit(
+            engagement_id,
+            "engagement_resumed",
+            {"completed_phases": sorted(done), "attempt": resume_count},
+        )
+    else:
+        await _emit(
+            engagement_id, "engagement_started", {"phases": [p for p, _ in PHASES]}
+        )
     outputs: dict[str, str] = {}
 
     async def phase(
@@ -251,12 +367,26 @@ async def run_engagement(
         user_message: str,
         *,
         system_override: str | None = None,
+        checkpoint: bool = True,
+        images: list[str] | None = None,
         **kw: Any,
     ) -> str:
+        # Resume: a checkpointed phase already completed in an earlier pass —
+        # return its stored output without re-calling the model.
+        if checkpoint and name in done:
+            return done[name]
         await _emit(engagement_id, "phase_started", {"phase": name, "agent": agent})
         started = time.monotonic()
         system = system_override or prompts.agent_system_prompt(agent)
-        result = await call(agent, system, user_message, api_key=api_key, model=model, **kw)
+        result = await call(
+            agent,
+            system,
+            user_message,
+            api_key=api_key,
+            model=model,
+            images=images,
+            **kw,
+        )
         await _emit(
             engagement_id,
             "phase_completed",
@@ -267,6 +397,7 @@ async def run_engagement(
                 "output": result,
             },
         )
+        done[name] = result
         return result
 
     try:
@@ -278,7 +409,15 @@ async def run_engagement(
         outputs["classify"] = await phase(
             "classify",
             "case-classifier",
-            f"{case}\n\nProduce the structured intake brief.",
+            f"{case}\n\nProduce the structured intake brief."
+            + (
+                "\n\nThe user attached image(s) (charts, graphs, screenshots) "
+                "below — read them as part of the brief and incorporate what "
+                "they show."
+                if images
+                else ""
+            ),
+            images=images,
             max_tokens=2000,
         )
 
@@ -291,6 +430,7 @@ async def run_engagement(
             "ledger. This is a non-interactive run: for every gap, ASSUME with a "
             "labeled `[ASSUMPTION AL-xx: ...]` entry (statement, working value, "
             "confidence, breakeven) rather than escalating to a human.",
+            images=images,
             max_tokens=2000,
         )
 
@@ -358,11 +498,12 @@ async def run_engagement(
             "4. The ACQUIRER's own capability gaps the deal is meant to close, and "
             "whether it can integrate/realise them.\n"
             "5. Price, synergies, and valuation (does it create or destroy value?).\n"
-            "6. Strategic ALTERNATIVES — other targets, partner vs build vs acquire, and "
-            "not pursuing this move at all.\n"
+            "6. Strategic ALTERNATIVES — other targets, partner vs build vs"
+            " acquire, and not pursuing this move at all.\n"
             "7. Integration and execution risk.\n"
             "Assign each branch to the most appropriate owner; the market-analyst owns "
             "commercial-capability and go-to-market branches, not just market sizing.",
+            images=images,
             max_tokens=3000,
         )
 
@@ -372,11 +513,13 @@ async def run_engagement(
         # 65 s between calls, giving the bucket 6 500 token refill headroom.
         # Analysts run one-at-a-time (no semaphore needed) using MINIMAL context:
         # only case + key assumptions + issue tree — not all 5 prior outputs.
-        await _emit(
-            engagement_id,
-            "phase_started",
-            {"phase": "analysis", "agent": "5 specialist analysts"},
-        )
+        analysis_done = "analysis" in done
+        if not analysis_done:
+            await _emit(
+                engagement_id,
+                "phase_started",
+                {"phase": "analysis", "agent": "5 specialist analysts"},
+            )
 
         # Compact context for analysts: case + key assumptions + issue tree only.
         # This keeps analyst input ≤ 1 500 tokens (fits within 6 k TPM per call).
@@ -387,7 +530,11 @@ async def run_engagement(
             + knowledge_section
         )
 
-        async def run_analyst(agent: str) -> tuple[str, str]:
+        async def run_analyst(agent: str) -> str:
+            # Resume: a finished analyst is served from the checkpoint cache,
+            # so a rate-limit pause never re-runs work that already landed.
+            if agent in analyst_cache:
+                return analyst_cache[agent]
             await _emit(engagement_id, "analyst_started", {"agent": agent})
             started = time.monotonic()
             result = await call(
@@ -401,20 +548,25 @@ async def run_engagement(
                 "placeholder like 'AL-xx'. Keep total response under 500 words.",
                 api_key=api_key,
                 model=model,
+                images=images,
                 max_tokens=2000,
             )
             await _emit(
                 engagement_id,
                 "analyst_completed",
-                {"agent": agent, "duration_ms": round((time.monotonic() - started) * 1000)},
+                {
+                    "agent": agent,
+                    "duration_ms": round((time.monotonic() - started) * 1000),
+                    "output": result,
+                },
             )
-            return agent, result
+            analyst_cache[agent] = result
+            return result
 
         # Run analysts sequentially to stay within Groq 6 k TPM.
-        analyst_results: list[tuple[str, str]] = []
+        analyst_outputs: dict[str, str] = {}
         for analyst_name in ANALYSTS:
-            analyst_results.append(await run_analyst(analyst_name))
-        analyst_outputs: dict[str, str] = {a: r for a, r in analyst_results}
+            analyst_outputs[analyst_name] = await run_analyst(analyst_name)
 
         def render_analysis() -> str:
             return "\n\n".join(
@@ -422,21 +574,27 @@ async def run_engagement(
             )
 
         outputs["analysis"] = render_analysis()
-        await _emit(
-            engagement_id,
-            "phase_completed",
-            {"phase": "analysis", "agent": "5 specialist analysts", "output": render_analysis()},
-        )
+        if not analysis_done:
+            done["analysis"] = outputs["analysis"]
+            await _emit(
+                engagement_id,
+                "phase_completed",
+                {
+                    "phase": "analysis",
+                    "agent": "5 specialist analysts",
+                    "output": render_analysis(),
+                },
+            )
 
         # --- Engagement Manager reconciliation + governance (ADR-006) --------
         # Context budget: Groq 6 k TPM. Reconcile receives ONLY analyst outputs
         # (not the full accumulated phase history) to keep input ≤ 4 000 tokens.
-        analysis_detail = _section("Analyst findings (supporting detail)", render_analysis())
+        analysis_detail = _section(
+            "Analyst findings (supporting detail)", render_analysis()
+        )
         # Minimal reconcile context: case + issue tree + analyst outputs.
         reconcile_context = (
-            case
-            + _section("Issue tree", outputs["issue_tree"])
-            + analysis_detail
+            case + _section("Issue tree", outputs["issue_tree"]) + analysis_detail
         )
 
         canonical = await phase(
@@ -447,6 +605,7 @@ async def run_engagement(
             "reconciliation. Resolve every assumption-ID collision and every "
             "figure two analysts defined differently into ONE authoritative value.",
             system_override=ENGAGEMENT_MANAGER_SYSTEM,
+            checkpoint=False,  # governance re-runs on resume (cheap; analysts cached)
             max_tokens=3500,
         )
 
@@ -461,7 +620,9 @@ async def run_engagement(
             governance_context = (
                 case
                 + _section("Issue tree", outputs["issue_tree"])
-                + _section("CANONICAL RECONCILIATION — single source of truth", canonical)
+                + _section(
+                    "CANONICAL RECONCILIATION — single source of truth", canonical
+                )
                 + _section(
                     "Analyst working notes — context only, NOT reviewable",
                     "These notes were written BEFORE the canonical reconciliation "
@@ -495,6 +656,7 @@ async def run_engagement(
                 "contradiction the reconciliation failed to resolve, a decision-"
                 "critical figure with no quantification, or a canonical-ledger row "
                 "whose confidence is unjustified. Verdict: approved / needs_rework.",
+                checkpoint=False,
                 max_tokens=2000,
             )
             review_verdict = _reviewer_verdict(review)
@@ -520,6 +682,7 @@ async def run_engagement(
                 + "\n\nProduce a corrected canonical reconciliation that fixes every "
                 "issue the reviewer raised.",
                 system_override=ENGAGEMENT_MANAGER_SYSTEM,
+                checkpoint=False,
                 max_tokens=6000,
             )
             await _emit(engagement_id, "rework_completed", {"attempt": attempt + 1})
@@ -547,6 +710,7 @@ async def run_engagement(
             "recommendation — process or bookkeeping complaints belong to the "
             "reviewer, not you. End with exactly one line: `VERDICT: stands` or "
             "`VERDICT: stands_with_caveats` or `VERDICT: needs_rework`.",
+            checkpoint=False,
             max_tokens=2000,
         )
         challenge_verdict = _challenger_verdict(challenge)
@@ -563,28 +727,31 @@ async def run_engagement(
             final_context
             + _section("Reviewer notes", review)
             + _section("Challenger notes", challenge)
-            + f"\n\nGovernance state: reviewer={review_verdict}, challenger={challenge_verdict}. "
+            + f"\n\nGovernance state: reviewer={review_verdict},"
+            + f" challenger={challenge_verdict}. "
             + (
                 "Both gates cleared — write the final executive-ready client report."
                 if review_ready
-                else "The gates did not fully clear after rework — write an honest interim "
-                "status report that states plainly it is not a final recommendation and "
-                "lists exactly what must be reconciled next."
+                else "The gates did not fully clear after rework — write an honest"
+                " interim status report that states plainly it is not a final"
+                " recommendation and lists exactly what must be reconciled next."
             )
-            + "\n\nUse the CANONICAL RECONCILIATION as the single source of truth for "
-            "every number and every assumption ID — never cite a figure from the analyst "
-            "detail that the canonical ledger supersedes.\n"
+            + "\n\nUse the CANONICAL RECONCILIATION as the single source of truth"
+            " for every number and every assumption ID — never cite a figure from"
+            " the analyst detail that the canonical ledger supersedes.\n"
             "\nWrite it to MBB (McKinsey/Bain/BCG) partner standard:\n"
             f"- Start with an H1 title, then a meta line `**Prepared for:** the "
-            f"board · **Date:** {_today()} · **Governance:** reviewer={review_verdict} · "
+            f"board · **Date:** {_today()} · **Governance:**"
+            f" reviewer={review_verdict} · "
             f"challenger={challenge_verdict}`.\n"
             "- Lead with the answer (Pyramid Principle): the very first section is a "
             "`## Executive summary` whose first sentence is the single recommendation "
             "in one line, then the 2-3 reasons and the single biggest caveat.\n"
             "- Then: `## Situation`, `## Approach`, `## Analysis` (one subsection per "
             "issue-tree branch), `## Recommendation` (with numbered, sequenced next "
-            "steps and 'alternatives rejected, and why'), `## Risks & what would change "
-            "the answer`, and `## Appendix: assumptions log` (a markdown table with "
+            "steps and 'alternatives rejected, and why'), `## Risks & what would"
+            " change the answer`, and `## Appendix: assumptions log` (a markdown"
+            " table with "
             "columns ID | Confidence | Assumption | Breakeven).\n"
             "- Use markdown tables for every option comparison and every set of "
             "figures; keep prose tight and decision-oriented (MECE, no hedging beyond "
@@ -612,6 +779,7 @@ async def run_engagement(
             "independent value of the alternative (or the gap explicitly priced); "
             "never state that an offer is below intrinsic value and recommend "
             "accepting it without pricing why.",
+            checkpoint=False,
             max_tokens=config.REPORT_MAX_TOKENS,
         )
 
@@ -661,7 +829,151 @@ async def run_engagement(
             },
         )
 
+    except AllProvidersRateLimitedError as exc:
+        # Every provider is rate-limited at once. Don't fail — the work so far
+        # is checkpointed in events. Pause, wait for the soonest refill, and
+        # resume from where we stopped. The user sees a countdown, not an error.
+        await _pause_and_resume(
+            engagement_id,
+            exc,
+            case_prompt=case_prompt,
+            call=call,
+            api_key=api_key,
+            model=model,
+            images=images,
+            resume_count=resume_count,
+        )
+
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
         message = friendly_error(exc)
         db.set_engagement_status(engagement_id, "failed", error=message)
         await _emit(engagement_id, "engagement_failed", {"error": message})
+
+
+def _resume_delay(retry_after: float, resume_count: int) -> float:
+    """How long to wait before the next resume attempt.
+
+    ``retry_after`` is what the providers advertised, but it is often already
+    spent: the failover loop sleeps through the short cooldowns before giving
+    up, so by the time it hands back control the remaining wait can read ~0
+    while the provider's quota window has NOT actually refilled. Clamping to
+    MIN_RESUME_DELAY then would retry every 20 s and burn the whole attempt
+    budget in a couple of minutes.
+
+    So back off exponentially per attempt (20 s → 40 s → 80 s …, capped at
+    MAX_RESUME_DELAY). Patience is the point: waiting minutes costs nothing —
+    the work is checkpointed — whereas exhausting the retries fails a run that
+    only needed to sit still.
+
+    The delay is then jittered ±25%. Concurrent engagements share one provider
+    quota, so they hit the wall together and would otherwise wake in lockstep,
+    collide, and all pause again — a thundering herd that wastes the retry
+    budget. Spreading the wake-ups lets them refill in turn.
+    """
+    base = max(
+        config.MIN_RESUME_DELAY, min(float(retry_after), config.MAX_RESUME_DELAY)
+    )
+    delay = min(base * (2**resume_count), config.MAX_RESUME_DELAY)
+    # Clamp AFTER jittering: jittering a capped delay upward would push it past
+    # MAX_RESUME_DELAY and quietly break the ceiling (900 s * 1.25 = 1125 s).
+    # At the cap the spread becomes one-sided, which is fine — it still breaks
+    # up the herd, and erring shorter never violates the bound.
+    return min(delay * random.uniform(0.75, 1.25), config.MAX_RESUME_DELAY)
+
+
+async def _pause_and_resume(
+    engagement_id: str,
+    exc: AllProvidersRateLimitedError,
+    *,
+    case_prompt: str,
+    call: CallAgent,
+    api_key: str | None,
+    model: str | None,
+    images: list[str] | None,
+    resume_count: int,
+) -> None:
+    """Pause a rate-limited engagement and schedule an automatic resume.
+
+    Completed phases/analysts are already persisted as events, so the resumed
+    run reconstructs them and continues from the first unfinished step. The
+    BYOK key and any images live only in the scheduled task's closure — never
+    persisted — consistent with the never-store-keys guarantee.
+    """
+    if resume_count >= config.MAX_AUTO_RESUMES:
+        message = (
+            "AI providers stayed rate-limited across several automatic retries. "
+            "Your progress is saved — please reopen this engagement in a little "
+            "while and it will finish."
+        )
+        db.set_engagement_status(engagement_id, "failed", error=message)
+        await _emit(engagement_id, "engagement_failed", {"error": message})
+        return
+
+    delay = _resume_delay(exc.retry_after, resume_count)
+    resume_at = time.time() + delay
+    db.set_engagement_status(engagement_id, "paused")
+    await _emit(
+        engagement_id,
+        "engagement_paused",
+        {
+            "resume_at": resume_at,
+            "delay_seconds": round(delay),
+            "attempt": resume_count + 1,
+            "reason": "All AI providers are refilling their rate limits. This "
+            "engagement will resume automatically from where it paused — no "
+            "action needed.",
+        },
+    )
+    if not config.AUTO_RESUME:
+        return
+
+    async def _resume() -> None:
+        try:
+            await asyncio.sleep(delay)
+            await run_engagement(
+                engagement_id,
+                case_prompt,
+                call=call,
+                api_key=api_key,
+                model=model,
+                images=images,
+                resume_count=resume_count + 1,
+            )
+        except Exception:  # noqa: BLE001 — a resume failure must not crash the loop
+            pass
+
+    asyncio.create_task(_resume())
+
+
+async def recover_interrupted() -> None:
+    """Adopt engagements orphaned by a server restart. Called once at startup.
+
+    A pause schedules an in-process task; stopping the process kills it, so a
+    paused run would otherwise sit on a countdown that never fires. Now that
+    the database survives redeploys, that stall would be permanent.
+
+    Free-tier runs resume on the server's own providers. BYOK runs cannot: the
+    user's key was never persisted (by design), and silently finishing them on
+    the free chain would downgrade a premium run — so they are closed with an
+    honest message instead of quietly resuming at lower quality.
+
+    NOTE: this assumes ONE process owns the database (the current deployment
+    runs a single uvicorn worker). Adding ``--workers N`` would make every
+    worker adopt the same engagements and run them N times over — gate this
+    behind a leader election or a claim on the row before scaling out.
+    """
+    for row in db.interrupted_engagements():
+        engagement_id = row["id"]
+        if row["used_byok"]:
+            message = (
+                "The server restarted while this engagement was running. Your "
+                "API key is never stored, so it can't be resumed automatically "
+                "— please run it again. Your completed steps are saved below."
+            )
+            db.set_engagement_status(engagement_id, "failed", error=message)
+            await _emit(engagement_id, "engagement_failed", {"error": message})
+            continue
+        log.info("resuming engagement %s after restart", engagement_id)
+        # Images aren't persisted either, so a resumed run continues on the
+        # case text alone; already-finished phases keep whatever they saw.
+        asyncio.create_task(run_engagement(engagement_id, row["case_prompt"]))

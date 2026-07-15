@@ -5,9 +5,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
 def _default_agents_dir() -> Path:
     try:
-        return Path(__file__).resolve().parents[4] / "plugins" / "ruflo-stratagent" / "agents"
+        return (
+            Path(__file__).resolve().parents[4]
+            / "plugins"
+            / "ruflo-stratagent"
+            / "agents"
+        )
     except IndexError:
         return Path("/agents")
 
@@ -20,14 +26,23 @@ def _default_vault_dir() -> Path:
 
 
 AGENTS_DIR = Path(os.environ.get("STRATAGENT_AGENTS_DIR") or str(_default_agents_dir()))
-VAULT_FRAMEWORKS_DIR = Path(os.environ.get("STRATAGENT_VAULT_DIR") or str(_default_vault_dir()))
+VAULT_FRAMEWORKS_DIR = Path(
+    os.environ.get("STRATAGENT_VAULT_DIR") or str(_default_vault_dir())
+)
 
-DB_PATH = Path(os.environ.get("STRATAGENT_DB", Path(__file__).resolve().parents[1] / "dashboard.db"))
+DB_PATH = Path(
+    os.environ.get(
+        "STRATAGENT_DB", Path(__file__).resolve().parents[1] / "dashboard.db"
+    )
+)
 
 # LLM access is a multi-provider failover chain (see pipeline/providers.py):
-# Gemini 2.5 Flash → OpenRouter free → Groq. Providers join the chain when
-# their key is present: GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY.
-# Per-provider model overrides: GEMINI_MODEL, OPENROUTER_MODEL, GROQ_MODEL.
+# Gemini → Cerebras → OpenRouter → GitHub Models → Cloudflare Workers AI.
+# Providers join the chain when their key is present: GEMINI_API_KEY,
+# CEREBRAS_API_KEY, OPENROUTER_API_KEY, GITHUB_MODELS_TOKEN, and
+# CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (Cloudflare needs both).
+# Per-provider model overrides: GEMINI_MODEL, CEREBRAS_MODEL, OPENROUTER_MODEL,
+# GITHUB_MODELS_MODEL, CLOUDFLARE_MODEL.
 # BYOK premium path: a user-supplied Anthropic key runs the whole engagement
 # on STRATAGENT_BYOK_MODEL (default claude-opus-4-8), bypassing the free chain
 # and the daily quota. The key is per-request only — never stored or logged.
@@ -40,7 +55,7 @@ REPORT_MAX_TOKENS = int(os.environ.get("STRATAGENT_REPORT_MAX_TOKENS", "8192"))
 MODEL_CHOICES = [
     {
         "id": "auto",
-        "label": "Auto — Gemini 2.5 Flash with automatic fallback (OpenRouter, Groq)",
+        "label": "Auto — best available provider, with automatic fallback",
         "tier": "auto",
     },
 ]
@@ -55,6 +70,7 @@ _ALLOWED_MODELS = {m["id"] for m in MODEL_CHOICES} | _LEGACY_MODELS
 def is_allowed_model(model: str) -> bool:
     return model in _ALLOWED_MODELS
 
+
 # Governance rework loop (ADR-006): if the reviewer returns needs_rework, the
 # implicated analysts are re-dispatched to reconcile the flagged contradictions,
 # then the reviewer runs again. This caps how many reconciliation passes run
@@ -65,13 +81,40 @@ MAX_REWORK = int(os.environ.get("STRATAGENT_MAX_REWORK", "1"))
 # Useful for demos, local frontend work, and tests.
 MOCK_MODE = os.environ.get("STRATAGENT_MOCK", "") == "1"
 
+# Max engagements running their LLM pipeline at once (server-wide). Requests
+# still return 202 immediately; work beyond this waits its turn rather than
+# piling unbounded concurrent load onto the single SQLite writer and the shared
+# provider quota. Raise it as provider capacity (more keys) grows.
+MAX_CONCURRENT_ENGAGEMENTS = int(os.environ.get("STRATAGENT_MAX_CONCURRENT", "8"))
+
+# Auto-resume on rate-limit exhaustion. When every provider is rate-limited at
+# once, the engine checkpoints completed phases, pauses the engagement, waits
+# for the soonest provider to refill, then resumes from where it left off —
+# instead of failing and losing the work. These bound that behaviour.
+#   MAX_AUTO_RESUMES — give up (mark failed) after this many automatic retries.
+#   MIN/MAX_RESUME_DELAY — clamp the wait so it's neither a busy-loop nor a stall.
+#   AUTO_RESUME — kill switch (tests set 0 to inspect the paused state directly).
+MAX_AUTO_RESUMES = int(os.environ.get("STRATAGENT_MAX_AUTO_RESUMES", "6"))
+MIN_RESUME_DELAY = float(os.environ.get("STRATAGENT_MIN_RESUME_DELAY", "20"))
+MAX_RESUME_DELAY = float(os.environ.get("STRATAGENT_MAX_RESUME_DELAY", "900"))
+AUTO_RESUME = os.environ.get("STRATAGENT_AUTO_RESUME", "1") == "1"
+
 # Whether the server has at least one provider API key. All users share the
 # server keys (rate-limited per client-id by DAILY_ENGAGEMENT_QUOTA).
+# Must list every provider build_chain() can construct, or a server configured
+# with only a new provider's key would wrongly report "no free tier".
+# Cloudflare needs BOTH an account id (baked into its URL) and a token.
 SERVER_HAS_KEY = bool(
     os.environ.get("GEMINI_API_KEY")
     or os.environ.get("GOOGLE_API_KEY")
+    or os.environ.get("CEREBRAS_API_KEY")
     or os.environ.get("OPENROUTER_API_KEY")
-    or os.environ.get("GROQ_API_KEY")
+    or os.environ.get("GITHUB_MODELS_TOKEN")
+    or os.environ.get("GITHUB_TOKEN")
+    or (
+        os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+        and os.environ.get("CLOUDFLARE_API_TOKEN")
+    )
 )
 
 # Per-user daily engagement quota (public-product rate limiting).
@@ -80,6 +123,8 @@ DAILY_ENGAGEMENT_QUOTA = int(os.environ.get("STRATAGENT_DAILY_QUOTA", "5"))
 # CORS origins for the frontend, comma-separated.
 CORS_ORIGINS = [
     o.strip()
-    for o in os.environ.get("STRATAGENT_CORS_ORIGINS", "http://localhost:3000").split(",")
+    for o in os.environ.get("STRATAGENT_CORS_ORIGINS", "http://localhost:3000").split(
+        ","
+    )
     if o.strip()
 ]

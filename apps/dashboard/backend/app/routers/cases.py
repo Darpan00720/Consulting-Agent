@@ -33,7 +33,9 @@ class RunEvalRequest(BaseModel):
 
 
 @router.post("", status_code=201)
-def create_case(body: CreateCaseRequest, cid: str = Depends(client_id)) -> dict[str, Any]:
+def create_case(
+    body: CreateCaseRequest, cid: str = Depends(client_id)
+) -> dict[str, Any]:
     case_id = db.create_case(cid, body.title.strip(), body.prompt, body.rubric)
     return {"id": case_id, "title": body.title.strip()}
 
@@ -88,8 +90,8 @@ async def run_eval(
     if db.engagements_today(cid) >= config.DAILY_ENGAGEMENT_QUOTA:
         raise HTTPException(
             status_code=429,
-            detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA} engagements/24h). "
-            "Please try again tomorrow.",
+            detail=f"Free-tier limit reached ({config.DAILY_ENGAGEMENT_QUOTA}"
+            " engagements/24h). Please try again tomorrow.",
         )
 
     try:

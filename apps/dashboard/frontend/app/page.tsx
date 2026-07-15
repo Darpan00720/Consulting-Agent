@@ -39,7 +39,49 @@ const ICONS = {
       <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
     </svg>
   ),
+  image: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  ),
+  close: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+    </svg>
+  ),
 };
+
+const MAX_IMAGES = 6;
+const MAX_EDGE = 1568; // Anthropic/OpenAI vision sweet spot — downscale to fit
+
+// Read an image file, downscale its longest edge to MAX_EDGE, and return a
+// JPEG data URL. Keeps payloads small (server caps each at ~5 MB) and strips
+// nothing the model needs to read a chart or screenshot.
+function downscaleImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read image"));
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onerror = () => reject(new Error("Could not decode image"));
+      img.onload = () => {
+        const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Canvas unavailable"));
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function Home() {
   const router = useRouter();
@@ -49,6 +91,8 @@ export default function Home() {
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [images, setImages] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => {});
@@ -65,11 +109,50 @@ export default function Home() {
     else localStorage.removeItem("stratagent_api_key");
   }
 
+  async function addFiles(files: File[]) {
+    const pics = files.filter((f) => f.type.startsWith("image/"));
+    if (!pics.length) return;
+    setError(null);
+    const room = MAX_IMAGES - images.length;
+    if (room <= 0) {
+      setError(`You can attach up to ${MAX_IMAGES} images.`);
+      return;
+    }
+    try {
+      const encoded = await Promise.all(pics.slice(0, room).map(downscaleImage));
+      setImages((prev) => [...prev, ...encoded].slice(0, MAX_IMAGES));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function onPaste(e: React.ClipboardEvent) {
+    const files = Array.from(e.clipboardData.files);
+    if (files.some((f) => f.type.startsWith("image/"))) {
+      e.preventDefault(); // keep binary out of the text box
+      void addFiles(files);
+    }
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    void addFiles(Array.from(e.dataTransfer.files));
+  }
+
+  function removeImage(idx: number) {
+    setImages((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   async function submit() {
     setError(null);
     setSubmitting(true);
     try {
-      const { id } = await api.createEngagement(casePrompt, apiKey.trim());
+      const { id } = await api.createEngagement(
+        casePrompt,
+        apiKey.trim(),
+        images,
+      );
       router.push(`/engagements/${id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -119,14 +202,65 @@ export default function Home() {
         <h2 id="case-heading">Describe the business problem</h2>
         <p className="muted panel-hint">
           Write it as you would brief a consultant: the company, the numbers
-          you have, and the decision that must be made.
+          you have, and the decision that must be made. You can also paste
+          charts, graphs, or screenshots directly into the box — the analysts
+          will read them.
         </p>
-        <textarea
-          value={casePrompt}
-          onChange={(e) => setCasePrompt(e.target.value)}
-          placeholder="The company, its market, the key figures you know, and the decision the leadership team needs to make…"
-          aria-label="Business problem description"
-        />
+        <div
+          className={`case-input${dragging ? " dragging" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+        >
+          <textarea
+            value={casePrompt}
+            onChange={(e) => setCasePrompt(e.target.value)}
+            onPaste={onPaste}
+            placeholder="The company, its market, the key figures you know, and the decision the leadership team needs to make… (paste a chart or screenshot anytime)"
+            aria-label="Business problem description"
+          />
+          {images.length > 0 && (
+            <div className="thumb-strip" aria-label="Attached images">
+              {images.map((src, i) => (
+                <div className="thumb" key={i}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt={`Attached image ${i + 1}`} />
+                  <button
+                    type="button"
+                    className="thumb-remove"
+                    onClick={() => removeImage(i)}
+                    aria-label={`Remove image ${i + 1}`}
+                  >
+                    {ICONS.close}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="case-input-foot">
+            <label className="attach-btn">
+              {ICONS.image} Add images
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  void addFiles(Array.from(e.target.files ?? []));
+                  e.target.value = "";
+                }}
+                hidden
+              />
+            </label>
+            <span className="muted attach-hint">
+              {images.length > 0
+                ? `${images.length} of ${MAX_IMAGES} attached`
+                : "Paste or drag to attach charts & screenshots"}
+            </span>
+          </div>
+        </div>
 
         <div className="key-zone">
           {!showKey ? (
@@ -141,13 +275,13 @@ export default function Home() {
                 type="password"
                 value={apiKey}
                 onChange={(e) => updateKey(e.target.value)}
-                placeholder="sk-ant-… · sk-… · sk-or-… · gsk_… · AIza…"
+                placeholder="sk-ant-… · sk-… · sk-or-… · csk-… · gsk_… · AIza…"
                 autoComplete="off"
               />
               <p className="muted key-hint">
-                Works with an Anthropic, OpenAI, OpenRouter, Groq, or Google
-                key — the whole engagement runs on that provider&apos;s top
-                model, with no daily limit. The key stays in this browser,
+                Works with an Anthropic, OpenAI, OpenRouter, Cerebras, Groq, or
+                Google key — the whole engagement runs on that provider&apos;s
+                top model, with no daily limit. The key stays in this browser,
                 travels only with your run, and is never stored on the server.
                 Leave empty to use the free tier
                 {health?.free_tier_quota

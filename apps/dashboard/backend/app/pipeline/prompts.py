@@ -10,12 +10,12 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from functools import lru_cache
+from functools import cache, lru_cache
 
 from app import config
 
 
-@lru_cache(maxsize=None)
+@cache
 def agent_system_prompt(agent_name: str) -> str:
     path = config.AGENTS_DIR / f"{agent_name}.md"
     text = path.read_text(encoding="utf-8")
@@ -31,7 +31,9 @@ def agent_system_prompt(agent_name: str) -> str:
 def vault_framework_index() -> str:
     """A name-only index of the governed framework vault, for the selector."""
     names = sorted(
-        p.stem for p in config.VAULT_FRAMEWORKS_DIR.glob("*.md") if not p.stem.startswith("_")
+        p.stem
+        for p in config.VAULT_FRAMEWORKS_DIR.glob("*.md")
+        if not p.stem.startswith("_")
     )
     return "\n".join(f"- {n}" for n in names)
 
@@ -54,10 +56,63 @@ def _strip_frontmatter(text: str) -> str:
 
 _TOKEN_RE = re.compile(r"[a-z][a-z0-9\-]{2,}")
 _STOPWORDS = frozenset(
-    "the and for with that this from are was were has have not but its can "
-    "will would should could may might all any each which what when where "
-    "how who why into out over under between within without more most other "
-    "some such than then them they their there these those you your our".split()
+    [
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "are",
+        "was",
+        "were",
+        "has",
+        "have",
+        "not",
+        "but",
+        "its",
+        "can",
+        "will",
+        "would",
+        "should",
+        "could",
+        "may",
+        "might",
+        "all",
+        "any",
+        "each",
+        "which",
+        "what",
+        "when",
+        "where",
+        "how",
+        "who",
+        "why",
+        "into",
+        "out",
+        "over",
+        "under",
+        "between",
+        "within",
+        "without",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "than",
+        "then",
+        "them",
+        "they",
+        "their",
+        "there",
+        "these",
+        "those",
+        "you",
+        "your",
+        "our",
+    ]
 )
 
 

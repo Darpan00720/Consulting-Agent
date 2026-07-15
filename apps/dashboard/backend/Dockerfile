@@ -18,6 +18,12 @@ COPY apps/dashboard/backend/app ./app
 COPY plugins/ruflo-stratagent/agents /agents
 COPY knowledge-vault /vault
 
+# SQLite lives here and is backed by a named volume (see docker-compose.yml).
+# The directory must exist in the image AND be owned by the runtime user: a
+# fresh named volume inherits ownership from the image path it covers, so
+# without this the volume mounts as root and the non-root app cannot open the DB.
+RUN mkdir -p /app/data
+
 # Non-root user
 RUN useradd -m app && chown -R app /app /agents /vault
 USER app

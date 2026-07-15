@@ -1,0 +1,78 @@
+name: CI
+
+# Gates every push and PR. BOTH suites run — the frozen core (packages/) AND
+# the shipping dashboard (apps/dashboard) — so neither can regress unnoticed.
+# No secrets are used: the core is pure-Python and the dashboard runs its tests
+# in mock mode (STRATAGENT_MOCK=1), so no provider API key is ever needed in CI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core packages (packages/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Sync
+        run: uv sync --dev
+      - name: Lint (ruff)
+        run: uv run ruff check packages scripts tests
+      - name: Format check (black)
+        run: uv run black --check packages scripts tests
+      - name: Types (mypy --strict)
+        run: uv run mypy packages
+      - name: Tests
+        run: uv run pytest -q
+
+  dashboard:
+    name: Dashboard backend (apps/dashboard)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dashboard/backend
+    env:
+      STRATAGENT_MOCK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Sync
+        run: uv sync --extra dev
+      - name: Lint (ruff)
+        run: uv run ruff check app tests
+      - name: Format check (black)
+        run: uv run black --check app tests
+      - name: Tests (mock mode, no API key)
+        run: uv run --extra dev pytest -q
+
+  frontend:
+    name: Dashboard frontend (apps/dashboard/frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dashboard/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build

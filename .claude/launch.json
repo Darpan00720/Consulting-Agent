@@ -6,7 +6,7 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "uvicorn", "app.main:app", "--port", "8000"],
       "cwd": "apps/dashboard/backend",
-      "env": { "STRATAGENT_MOCK": "1" },
+      "comment": "Provider keys come from apps/dashboard/.env (gitignored) — NEVER hardcode a key here; this file is tracked.",
       "port": 8000
     },
     {

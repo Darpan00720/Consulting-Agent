@@ -104,7 +104,7 @@ export const api = {
   listLessons: () => request<Lesson[]>("/api/lessons"),
   deleteLesson: (id: number) =>
     fetch(`${API_URL}/api/lessons/${id}`, { method: "DELETE" }),
-  createEngagement: (casePrompt: string, apiKey?: string) =>
+  createEngagement: (casePrompt: string, apiKey?: string, images?: string[]) =>
     request<{ id: string; status: string; phases: string[] }>(
       "/api/engagements",
       {
@@ -112,6 +112,7 @@ export const api = {
         body: JSON.stringify({
           case_prompt: casePrompt,
           api_key: apiKey || undefined,
+          images: images && images.length ? images : undefined,
         }),
       },
     ),

@@ -4,14 +4,32 @@ services:
       context: ../../   # repo root — Dockerfile needs agents/ and knowledge-vault/
       dockerfile: apps/dashboard/backend/Dockerfile
     environment:
-      # Provider failover chain: Gemini → OpenRouter → Groq. Any subset works;
-      # providers without a key are skipped.
+      # Provider failover chain, in order:
+      #   Gemini → Cerebras → OpenRouter → GitHub Models → Cloudflare Workers AI
+      # Any subset works; providers without a key are skipped. (Groq was removed
+      # from the free chain — its 6k TPM can't fit a reconcile prompt — but a
+      # `gsk_` key is still accepted as BYOK.)
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # GitHub PAT with the `models: read` scope.
+      GITHUB_MODELS_TOKEN: ${GITHUB_MODELS_TOKEN:-}
+      # Cloudflare needs BOTH: the account id is part of the endpoint URL.
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      # Optional per-provider model overrides (ids drift — see providers.py).
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      CEREBRAS_MODEL: ${CEREBRAS_MODEL:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      GITHUB_MODELS_MODEL: ${GITHUB_MODELS_MODEL:-}
+      CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-}
       STRATAGENT_DAILY_QUOTA: ${STRATAGENT_DAILY_QUOTA:-5}
       STRATAGENT_AGENTS_DIR: /agents
       STRATAGENT_VAULT_DIR: /vault
+      # Must point INTO the mounted volume below. Without this the DB defaults
+      # to /app/dashboard.db — outside the volume — and every rebuild silently
+      # destroys all engagement history.
+      STRATAGENT_DB: /app/data/dashboard.db
     volumes:
       # Persist the SQLite database between restarts
       - backend_data:/app/data

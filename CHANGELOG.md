@@ -7,7 +7,42 @@ first tagged release.
 
 ## [Unreleased]
 
-_No unreleased changes; all shipped in v0.1.0-rc2 below._
+_No unreleased changes beyond 1.0.0-beta.1 below._
+
+## [1.0.0-beta.1] — 2026-07-15
+
+First beta of the **public web dashboard** (`apps/dashboard/`), which is now the
+primary shipping product alongside the Claude Code plugin. The reference core
+(`packages/`) remains a frozen, separately-tested library — see
+`docs/architecture/ADR-008` for how the three artifacts relate.
+
+### Added
+- **Multi-provider free-tier chain** (`apps/dashboard/backend/app/pipeline/providers.py`):
+  Gemini → Cerebras → OpenRouter → GitHub Models → Cloudflare Workers AI, each
+  joining only when its key is present. **Multiple keys per provider** (comma or
+  numbered) with per-key pacing and failover.
+- **Auto-resume on rate-limit exhaustion**: engagements checkpoint completed
+  phases/analysts to the event log, pause with a live countdown, and resume from
+  the last completed step — no work lost, no manual re-run.
+- **Restart recovery**: engagements orphaned by a server restart are adopted at
+  startup (free-tier resumes; BYOK closes honestly since the key is never stored).
+- **Multimodal input**: paste charts/screenshots into the case brief; forwarded
+  to vision-capable providers, never persisted.
+- **Apple-grade engagement page**: staged stepper, per-analyst progress,
+  governance panel, auto-resume banner.
+- **CI** (`.github/workflows/ci.yml`) gating both test suites, lint, format, and
+  types; issue/PR templates.
+
+### Changed
+- **Groq removed from the free chain** (6k TPM can't fit a reconcile prompt);
+  a paid `gsk_` key is still accepted as BYOK.
+- Dashboard held to the same `ruff` + `black` bar as the core.
+
+### Fixed
+- Docker SQLite persistence (volume path never matched the DB path — every
+  redeploy silently wiped history).
+- Rate-limit classification hardened (413-as-rate-limit, reasoning-token
+  starvation, exponential resume backoff with jitter, cap-after-jitter).
 
 ## [0.1.0-rc2] — 2026-07-10
 

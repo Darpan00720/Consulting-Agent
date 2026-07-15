@@ -1,7 +1,7 @@
-"""Dashboard API tests — run entirely in mock mode (no Groq API calls).
+"""Dashboard API tests — run entirely in mock mode (no provider API calls).
 
 No accounts: identity is the anonymous X-Client-Id header.
-Server holds the Groq key; users need no key to run cases.
+The server holds the provider keys; users need no key to run cases.
 """
 
 from __future__ import annotations
@@ -66,6 +66,28 @@ def test_agent_prompts_load():
     assert "profit" in prompts.vault_framework_index()
 
 
+def test_governance_prompts_keep_the_vocabulary_the_parsers_need():
+    """The prompts are the core IP and have no other regression gate. The
+    dashboard's verdict parsers key off specific tokens — a prompt edit that
+    drops them silently breaks governance (verdicts stop parsing → fail closed
+    → every run goes interim). Pin the contract between prompt and parser."""
+    reviewer = prompts.agent_system_prompt("reviewer").lower()
+    assert "verdict" in reviewer
+    assert "approved" in reviewer and "needs_rework" in reviewer
+
+    challenger = prompts.agent_system_prompt("challenger").lower()
+    assert "verdict" in challenger
+    assert "stands" in challenger and "needs_rework" in challenger
+
+    report = prompts.agent_system_prompt("report-writer").lower()
+    assert "recommendation" in report and "assumption" in report
+
+    # Analysts must still instruct labeled assumptions — the evidence-
+    # traceability guarantee depends on it.
+    for analyst in ANALYSTS:
+        assert "assumption" in prompts.agent_system_prompt(analyst).lower()
+
+
 def test_full_engagement_mock_no_signup(client):
     """The whole flow works with nothing but a client id — no account."""
     created = client.post("/api/engagements", json={"case_prompt": CASE}, headers=CID_A)
@@ -85,6 +107,50 @@ def test_full_engagement_mock_no_signup(client):
     assert types[-1] == "engagement_completed"
     assert types.count("phase_completed") == len(PHASES)
     assert types.count("analyst_completed") == len(ANALYSTS)
+
+
+def test_concurrency_cap_limits_simultaneous_engagements(tmp_path, monkeypatch):
+    """No more than MAX_CONCURRENT_ENGAGEMENTS run their pipeline at once —
+    excess work waits its turn rather than piling onto the single SQLite writer
+    and shared provider quota."""
+    import app.pipeline.engine as engine
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "conc.db")
+    monkeypatch.setattr(config, "MAX_CONCURRENT_ENGAGEMENTS", 2)
+    monkeypatch.setattr(engine, "_engagement_semaphore", None)  # rebuild at new cap
+    db.reset_for_tests()
+
+    live = 0
+    peak = 0
+    gate = asyncio.Event()
+
+    async def fake_call(agent, system, user, **kw):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        if agent == "case-classifier":
+            await gate.wait()  # hold the first phase so runs overlap
+        live -= 1
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    async def drive():
+        ids = [db.create_engagement("browser-x", CASE) for _ in range(5)]
+        tasks = [
+            asyncio.create_task(run_engagement(i, CASE, call=fake_call)) for i in ids
+        ]
+        await asyncio.sleep(0.1)  # let admitted runs reach the gate
+        admitted = peak
+        gate.set()  # release everyone
+        await asyncio.gather(*tasks)
+        return admitted
+
+    admitted = asyncio.run(drive())
+    assert admitted <= 2, f"{admitted} engagements ran at once, cap was 2"
+    db.reset_for_tests()
 
 
 def test_engine_direct_with_fake_agent(tmp_path, monkeypatch):
@@ -126,7 +192,9 @@ def test_rework_loop_reconciles_then_completes(tmp_path, monkeypatch):
             review_calls["n"] += 1
             if review_calls["n"] == 1:
                 return "Verdict: needs_rework — AL-10 collision unresolved"
-            return "Verdict: approved — all five checks pass against the canonical ledger"
+            return (
+                "Verdict: approved — all five checks pass against the canonical ledger"
+            )
         if agent == "challenger":
             return "Verdict: stands_with_caveats"
         return f"output-of-{agent}"
@@ -195,7 +263,8 @@ def test_reflection_learns_lessons_on_blocked_run(tmp_path, monkeypatch):
             return "Verdict: needs_rework"
         if agent == "reflector":
             return (
-                "LESSON: For acquisition cases, include a commercial go-to-market branch.\n"
+                "LESSON: For acquisition cases, include a commercial"
+                " go-to-market branch.\n"
                 "LESSON: Assign globally-unique assumption IDs across all analysts.\n"
                 "NONE"
             )
@@ -275,9 +344,15 @@ def test_parse_lessons_leakage_guard():
 def test_verdict_parsers():
     from app.pipeline.engine import _challenger_verdict, _reviewer_verdict
 
-    assert _reviewer_verdict("Final verdict: needs_rework, 2 checks fail") == "needs_rework"
+    assert (
+        _reviewer_verdict("Final verdict: needs_rework, 2 checks fail")
+        == "needs_rework"
+    )
     assert _reviewer_verdict("VERDICT: APPROVED") == "approved"
-    assert _reviewer_verdict("no token here") == "approved"  # safe default
+    # Fail closed: an unreadable governance verdict is NOT a pass. It yields an
+    # interim memo (review_ready=False), never a report claiming a gate cleared.
+    assert _reviewer_verdict("no token here") == "needs_rework"
+    assert _challenger_verdict("no token here") == "needs_rework"
     assert _challenger_verdict("Verdict: stands_with_caveats") == "stands_with_caveats"
     assert _challenger_verdict("verdict: stands") == "stands"
     assert _challenger_verdict("verdict: needs_rework") == "needs_rework"
@@ -296,6 +371,227 @@ def test_engine_failure_marks_failed(tmp_path, monkeypatch):
     assert engagement["status"] == "failed"
     assert "api exploded" in engagement["error"]
     db.reset_for_tests()
+
+
+def test_rate_limit_pauses_then_resumes_from_checkpoint(tmp_path, monkeypatch):
+    """When all providers are rate-limited mid-run, the engagement pauses
+    (not fails); a resume reconstructs completed phases/analysts from the event
+    checkpoint and finishes WITHOUT re-running them."""
+    from app.pipeline.providers import AllProvidersRateLimitedError
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "resume.db")
+    monkeypatch.setattr(
+        config, "AUTO_RESUME", False
+    )  # resume manually, deterministically
+    db.reset_for_tests()
+    calls: list[str] = []
+    trip = {"fired": False}
+
+    async def fake_call(agent, system, user, **kw):
+        calls.append(agent)
+        if agent == "engagement-manager" and not trip["fired"]:
+            trip["fired"] = True  # fail once, at reconcile — after all analysts
+            raise AllProvidersRateLimitedError(30.0)
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=fake_call))
+
+    assert db.get_engagement(eid)["status"] == "paused"
+    types = [e["type"] for e in db.list_events(eid)]
+    assert "engagement_paused" in types
+    assert "engagement_failed" not in types
+    assert sorted(c for c in calls if c in ANALYSTS) == sorted(ANALYSTS)
+
+    calls.clear()
+    asyncio.run(run_engagement(eid, CASE, call=fake_call, resume_count=1))
+
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "completed"
+    assert engagement["report_md"] == "output-of-report-writer"
+    # nothing before reconcile was re-run — served from the checkpoint
+    assert not any(c in ANALYSTS for c in calls)
+    assert "case-classifier" not in calls and "issue-tree-generator" not in calls
+    # reconcile onward DID run on resume (that's where it had paused)
+    assert "engagement-manager" in calls
+    events = db.list_events(eid)
+    assert any(e["type"] == "engagement_resumed" for e in events)
+    assert events[-1]["type"] == "engagement_completed"
+    db.reset_for_tests()
+
+
+def test_max_auto_resumes_eventually_fails(tmp_path, monkeypatch):
+    """A permanently rate-limited chain fails only after exhausting retries —
+    and even then reports saved progress, never a lost run."""
+    from app.pipeline.providers import AllProvidersRateLimitedError
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "giveup.db")
+    monkeypatch.setattr(config, "AUTO_RESUME", False)
+    monkeypatch.setattr(config, "MAX_AUTO_RESUMES", 2)
+    db.reset_for_tests()
+
+    async def always_limited(agent, system, user, **kw):
+        raise AllProvidersRateLimitedError(30.0)
+
+    eid = db.create_engagement("browser-x", CASE)
+    # resume_count already at the cap → this attempt gives up
+    asyncio.run(run_engagement(eid, CASE, call=always_limited, resume_count=2))
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "failed"
+    assert "progress is saved" in engagement["error"].lower()
+    db.reset_for_tests()
+
+
+def test_resume_delay_backs_off_exponentially():
+    """A spent retry-after must not mean retrying every 20s until the attempt
+    budget is gone — each attempt waits longer, so a provider window that needs
+    minutes to refill actually gets them."""
+    from app.pipeline.engine import _resume_delay
+
+    delays = [_resume_delay(0.0, n) for n in range(config.MAX_AUTO_RESUMES)]
+    # Each attempt is meaningfully longer than the last (jitter is ±25%, so
+    # compare against the doubling rather than exact values).
+    for earlier, later in zip(delays, delays[1:], strict=False):
+        assert later > earlier
+    assert delays[0] >= config.MIN_RESUME_DELAY * 0.75
+    assert all(d <= config.MAX_RESUME_DELAY for d in delays)
+    # total patience across the budget is minutes, not seconds
+    assert sum(delays) > 600
+    # A long advertised retry-after is honoured but MUST stay capped. Sampled
+    # many times because jitter is random — a single draw would let an
+    # over-cap bug pass ~60% of the time (it did).
+    capped = [_resume_delay(10_000.0, 0) for _ in range(200)]
+    assert max(capped) <= config.MAX_RESUME_DELAY, "jitter broke the max-delay cap"
+    assert max(capped) > config.MAX_RESUME_DELAY * 0.7
+    # ...and the cap holds at every attempt, not just the first
+    for n in range(config.MAX_AUTO_RESUMES + 3):
+        assert _resume_delay(10_000.0, n) <= config.MAX_RESUME_DELAY
+
+
+def test_resume_delay_is_jittered_against_thundering_herd():
+    """Concurrent engagements share one provider quota, so they hit the limit
+    together. Identical delays would wake them in lockstep to collide again —
+    the waits must be spread out."""
+    from app.pipeline.engine import _resume_delay
+
+    delays = {_resume_delay(30.0, 1) for _ in range(20)}
+    assert len(delays) > 1, "resume delays are identical — herd will re-collide"
+    # but still anchored near the intended backoff, not wild
+    assert all(30.0 * 2 * 0.7 <= d <= 30.0 * 2 * 1.3 for d in delays)
+
+
+def test_restart_recovery_resumes_free_tier_run(tmp_path, monkeypatch):
+    """A run left paused by a server stop is adopted on the next startup and
+    finishes from its checkpoint — not left on a countdown that never fires."""
+    from app.pipeline.engine import recover_interrupted
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "recover.db")
+    db.reset_for_tests()
+
+    eid = db.create_engagement("browser-x", CASE)
+    db.set_engagement_status(eid, "paused")
+
+    # recover_interrupted schedules run_engagement as a task; await it so the
+    # assertions see the finished run rather than racing the loop teardown.
+    async def recover_and_drain():
+        await recover_interrupted()
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        await asyncio.gather(*pending)
+
+    asyncio.run(recover_and_drain())
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "completed"  # mock mode runs the full pipeline
+    assert engagement["report_md"]
+    db.reset_for_tests()
+
+
+def test_restart_recovery_does_not_silently_downgrade_byok(tmp_path, monkeypatch):
+    """A BYOK run can't be resumed (the key was never stored). It must be closed
+    honestly rather than quietly re-run on the free chain at lower quality."""
+    from app.pipeline.engine import recover_interrupted
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "recover_byok.db")
+    db.reset_for_tests()
+
+    eid = db.create_engagement("browser-x", CASE, used_byok=True)
+    db.set_engagement_status(eid, "paused")
+
+    asyncio.run(recover_interrupted())
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "failed"
+    assert engagement["report_md"] is None  # never resumed on the free chain
+    assert "never stored" in engagement["error"]
+    assert any(e["type"] == "engagement_failed" for e in db.list_events(eid))
+    db.reset_for_tests()
+
+
+def test_used_byok_flag_stores_no_key_material(client):
+    """The recovery flag must be a boolean, never the key itself."""
+    key = "sk-ant-supersecret-recovery-key"
+    client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "api_key": key},
+        headers=CID_A,
+    )
+    raw = (config.DB_PATH).read_bytes()
+    assert b"supersecret" not in raw
+    row = (
+        db.connect()
+        .execute("SELECT used_byok FROM engagements ORDER BY created_at DESC LIMIT 1")
+        .fetchone()
+    )
+    assert row["used_byok"] == 1
+
+
+def test_engagement_accepts_pasted_images(client):
+    img = "data:image/png;base64," + "A" * 200
+    created = client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "images": [img]},
+        headers=CID_A,
+    )
+    assert created.status_code == 202
+
+
+def test_engagement_rejects_malformed_images(client):
+    bad = client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "images": ["https://example.com/x.png"]},
+        headers=CID_A,
+    )
+    assert bad.status_code == 422
+
+
+def test_aggregate_payload_ceiling(client):
+    """Per-field caps allow ~42 MB in aggregate; the whole-request ceiling must
+    reject that so one request can't pin memory or starve concurrent runs."""
+    big = [
+        "data:image/png;base64," + "A" * 6_500_000 for _ in range(4)
+    ]  # ~26 MB total, each image individually under the 7 MB per-image cap
+    resp = client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "images": big},
+        headers=CID_A,
+    )
+    assert resp.status_code == 422
+
+
+def test_pasted_images_never_persisted(client, tmp_path):
+    """Like API keys, pasted images travel per-run and never touch the DB."""
+    marker = "UNIQUEIMGMARKERZZZ"
+    img = "data:image/png;base64," + marker + "A" * 60
+    eid = client.post(
+        "/api/engagements",
+        json={"case_prompt": CASE, "images": [img]},
+        headers=CID_A,
+    ).json()["id"]
+    client.get(f"/api/engagements/{eid}/events", headers=CID_A)
+    raw = (tmp_path / "test.db").read_bytes()
+    assert marker.encode() not in raw
 
 
 def test_free_tier_quota(client):
@@ -342,10 +638,12 @@ def test_ownership_isolation(client):
         "/api/engagements", json={"case_prompt": CASE}, headers=CID_A
     ).json()["id"]
     assert (
-        client.get(f"/api/engagements/{engagement_id}", headers=CID_B).status_code == 404
+        client.get(f"/api/engagements/{engagement_id}", headers=CID_B).status_code
+        == 404
     )
     assert (
-        client.get(f"/api/engagements/{engagement_id}", headers=CID_A).status_code == 200
+        client.get(f"/api/engagements/{engagement_id}", headers=CID_A).status_code
+        == 200
     )
 
 
@@ -353,9 +651,7 @@ def test_mock_mode_returns_canned_output():
     """In mock mode (no GROQ_API_KEY set), call_agent returns demo text."""
     from app.pipeline import claude as claude_mod
 
-    output = asyncio.run(
-        claude_mod.call_agent("financial-analyst", "s" * 200, "case")
-    )
+    output = asyncio.run(claude_mod.call_agent("financial-analyst", "s" * 200, "case"))
     assert "demo" in output.lower()
 
 
@@ -431,7 +727,10 @@ def test_eval_grades_report_and_learns_lessons(tmp_path, monkeypatch):
                 "MISSED: strategic alternatives to the acquisition not considered"
             )
         if agent == "reflector":
-            return "LESSON: Always evaluate strategic alternatives, not only the proposed move."
+            return (
+                "LESSON: Always evaluate strategic alternatives, not only"
+                " the proposed move."
+            )
         return f"output-of-{agent}"
 
     case_id = db.create_case("browser-x", "M&A case", CASE, RUBRIC)
@@ -499,7 +798,8 @@ def test_parse_grade():
     from app.pipeline.grading import _parse_grade
 
     score, missed = _parse_grade(
-        "SCORE: 85\nGOT: covered synergies\nMISSED: no KOL analysis\nMISSED: \nmissed: alternatives"
+        "SCORE: 85\nGOT: covered synergies\nMISSED: no KOL analysis\n"
+        "MISSED: \nmissed: alternatives"
     )
     assert score == 85
     assert missed == ["no KOL analysis", "alternatives"]

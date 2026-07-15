@@ -7,13 +7,16 @@ connects late replays history from the DB and then tails the bus.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections import defaultdict
 from typing import Any
 
 
 class EventBus:
     def __init__(self) -> None:
-        self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = defaultdict(list)
+        self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = defaultdict(
+            list
+        )
         self._lock = asyncio.Lock()
 
     async def subscribe(self, engagement_id: str) -> asyncio.Queue[dict[str, Any]]:
@@ -22,12 +25,12 @@ class EventBus:
             self._subscribers[engagement_id].append(queue)
         return queue
 
-    async def unsubscribe(self, engagement_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
+    async def unsubscribe(
+        self, engagement_id: str, queue: asyncio.Queue[dict[str, Any]]
+    ) -> None:
         async with self._lock:
-            try:
+            with contextlib.suppress(ValueError):
                 self._subscribers[engagement_id].remove(queue)
-            except ValueError:
-                pass
 
     async def publish(self, engagement_id: str, event: dict[str, Any]) -> None:
         async with self._lock:

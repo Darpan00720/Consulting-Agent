@@ -91,7 +91,10 @@ contracts are in [ADR-005](docs/architecture/ADR-005-Agent-Specifications.md).
 - **Operational telemetry** — per-engagement JSONL traces, analytics, OTel-ready
   spans, kept separate from the domain event log.
 - **Deterministic Python core** — frozen state, append-only event log, replay engine.
-- **Quality bar** — `ruff` + `black` + `mypy --strict` + **954 tests**.
+- **Quality bar** — `ruff` + `black` + `mypy --strict`, enforced in CI across both
+  the reference core (**954 tests**) and the shipping web dashboard (**61 tests**,
+  run in mock mode). See [ADR-008](docs/architecture/ADR-008-Repository-Topology.md)
+  for how the three artifacts relate.
 
 [ADR-007]: docs/architecture/ADR-007-Evidence-Providers.md
 
@@ -142,14 +145,22 @@ run the same way; their telemetry traces are in
 ## Repository structure
 
 ```
-plugins/ruflo-stratagent/   THE PLUGIN — commands, skill orchestrator, 16 agents, README
-packages/                   13 Python packages (deterministic platform)
+plugins/ruflo-stratagent/   DOMAIN DEFINITION — commands, skill orchestrator, 16 agents
+apps/dashboard/             SHIPPING PRODUCT — public web app (FastAPI + Next.js)
+packages/                   REFERENCE CORE — 13 Python packages, frozen (954 tests)
 scripts/                    CLI tools (validation, telemetry, schema)
-tests/                      pytest suite (954 tests)
+tests/                      pytest suite for packages/ (954 tests)
 knowledge-vault/            THE knowledge source of truth (governed notes)
 engagements/                per-engagement artifacts + worked examples
 docs/                       architecture, guides, operations, observability, beta, reviews
 ```
+
+**Three artifacts, one product line.** The plugin's agents + vault are the
+canonical consulting behaviour; `apps/dashboard/` is the production web app that
+runs them (and reads the same `agents/*.md` at runtime); `packages/` is the
+frozen, strictly-typed reference core. Which one to edit for a given change is
+spelled out in
+[ADR-008: Repository Topology](docs/architecture/ADR-008-Repository-Topology.md).
 
 ## Documentation index
 

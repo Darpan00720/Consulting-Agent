@@ -1,7 +1,7 @@
 {
   "name": "ruflo-stratagent",
   "description": "StratAgent — autonomous management-consulting engagements for Claude Code. Classify the case (M&A, profitability, market entry, pricing, cost reduction, growth, new product, turnaround, and more), scope it, dispatch specialist consultant agents, challenge the findings, and produce an executive-ready deliverable. Built on the Ruflo harness.",
-  "version": "0.1.0",
+  "version": "1.0.0-beta.1",
   "author": {
     "name": "darpan"
   },

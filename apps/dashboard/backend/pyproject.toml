@@ -1,7 +1,7 @@
 [project]
 name = "stratagent-dashboard"
-version = "0.1.0"
-description = "Web dashboard backend for StratAgent — run consulting engagements via the Groq API (free tier)"
+version = "1.0.0-beta.1"
+description = "Web dashboard backend for StratAgent — run governed consulting engagements on a multi-provider free tier (Gemini, Cerebras, OpenRouter, GitHub Models, Cloudflare) or any BYOK key."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
@@ -15,10 +15,24 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
+    "ruff>=0.6",
+    "black>=24.8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Lint/format standard matches the repo root (packages/) so the whole
+# codebase is held to one bar — the dashboard is not a second-class citizen.
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+line-length = 88
 
 [build-system]
 requires = ["hatchling"]

@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS engagements (
     review_verdict TEXT,
     challenge_verdict TEXT,
     review_ready INTEGER,
+    -- Whether the run used a user-supplied key. NOT the key itself (keys are
+    -- never persisted) — just a flag, so a restart can tell which paused runs
+    -- are safe to resume on the server's own providers.
+    used_byok INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     completed_at REAL
 );
@@ -78,8 +82,23 @@ def connect() -> sqlite3.Connection:
         _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(_SCHEMA)
+        _migrate(_conn)
         _conn.commit()
     return _conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a database was first created.
+
+    CREATE TABLE IF NOT EXISTS leaves existing tables untouched, so a DB from
+    an older build lacks newer columns. Now that the SQLite file survives
+    redeploys (docker volume), these have to be applied in place.
+    """
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(engagements)")}
+    if "used_byok" not in existing:
+        conn.execute(
+            "ALTER TABLE engagements ADD COLUMN used_byok INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def reset_for_tests() -> None:
@@ -91,26 +110,52 @@ def reset_for_tests() -> None:
 
 # --- engagements ------------------------------------------------------------
 
-def create_engagement(client_id: str, case_prompt: str) -> str:
+
+def create_engagement(
+    client_id: str, case_prompt: str, *, used_byok: bool = False
+) -> str:
     engagement_id = f"eng_{uuid.uuid4().hex}"
     with _lock:
         conn = connect()
         conn.execute(
-            "INSERT INTO engagements (id, client_id, case_prompt, status, created_at)"
-            " VALUES (?,?,?, 'queued', ?)",
-            (engagement_id, client_id, case_prompt, time.time()),
+            "INSERT INTO engagements (id, client_id, case_prompt, status, used_byok,"
+            " created_at) VALUES (?,?,?, 'queued', ?, ?)",
+            (engagement_id, client_id, case_prompt, 1 if used_byok else 0, time.time()),
         )
         conn.commit()
     return engagement_id
 
 
+def interrupted_engagements() -> list[dict[str, Any]]:
+    """Runs left mid-flight by a server stop (status running/paused).
+
+    Their in-process asyncio resume task died with the old process, so nothing
+    would ever move them again — startup recovery adopts or closes them.
+    """
+    with _lock:
+        rows = (
+            connect()
+            .execute(
+                "SELECT id, case_prompt, used_byok FROM engagements"
+                " WHERE status IN ('running', 'paused')"
+            )
+            .fetchall()
+        )
+    return [dict(row) for row in rows]
+
+
 def engagements_today(client_id: str) -> int:
     day_start = time.time() - 86400
     with _lock:
-        row = connect().execute(
-            "SELECT COUNT(*) AS n FROM engagements WHERE client_id = ? AND created_at > ?",
-            (client_id, day_start),
-        ).fetchone()
+        row = (
+            connect()
+            .execute(
+                "SELECT COUNT(*) AS n FROM engagements"
+                " WHERE client_id = ? AND created_at > ?",
+                (client_id, day_start),
+            )
+            .fetchone()
+        )
     return int(row["n"])
 
 
@@ -126,26 +171,37 @@ def set_governance(
         conn.execute(
             "UPDATE engagements SET review_verdict = ?, challenge_verdict = ?,"
             " review_ready = ? WHERE id = ?",
-            (review_verdict, challenge_verdict, 1 if review_ready else 0, engagement_id),
+            (
+                review_verdict,
+                challenge_verdict,
+                1 if review_ready else 0,
+                engagement_id,
+            ),
         )
         conn.commit()
 
 
 def get_engagement(engagement_id: str) -> dict[str, Any] | None:
     with _lock:
-        row = connect().execute(
-            "SELECT * FROM engagements WHERE id = ?", (engagement_id,)
-        ).fetchone()
+        row = (
+            connect()
+            .execute("SELECT * FROM engagements WHERE id = ?", (engagement_id,))
+            .fetchone()
+        )
     return dict(row) if row else None
 
 
 def list_engagements(client_id: str) -> list[dict[str, Any]]:
     with _lock:
-        rows = connect().execute(
-            "SELECT id, case_prompt, status, created_at, completed_at"
-            " FROM engagements WHERE client_id = ? ORDER BY created_at DESC",
-            (client_id,),
-        ).fetchall()
+        rows = (
+            connect()
+            .execute(
+                "SELECT id, case_prompt, status, created_at, completed_at"
+                " FROM engagements WHERE client_id = ? ORDER BY created_at DESC",
+                (client_id,),
+            )
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -174,6 +230,7 @@ def set_engagement_status(
 
 # --- lessons (the reflection / learning loop) -------------------------------
 
+
 def add_lesson(text: str, engagement_id: str | None = None) -> bool:
     """Store a durable process lesson. Returns False if it already exists."""
     text = text.strip()
@@ -194,10 +251,15 @@ def add_lesson(text: str, engagement_id: str | None = None) -> bool:
 
 def list_lessons(limit: int = 40) -> list[dict[str, Any]]:
     with _lock:
-        rows = connect().execute(
-            "SELECT id, text, created_at FROM lessons ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        rows = (
+            connect()
+            .execute(
+                "SELECT id, text, created_at FROM lessons"
+                " ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -209,6 +271,7 @@ def delete_lesson(lesson_id: int) -> None:
 
 
 # --- golden cases + evals (the benchmark / "train with answers" loop) --------
+
 
 def create_case(client_id: str, title: str, prompt: str, rubric: str) -> str:
     case_id = f"case_{uuid.uuid4().hex}"
@@ -225,21 +288,28 @@ def create_case(client_id: str, title: str, prompt: str, rubric: str) -> str:
 
 def get_case(case_id: str) -> dict[str, Any] | None:
     with _lock:
-        row = connect().execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+        row = (
+            connect().execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+        )
     return dict(row) if row else None
 
 
 def list_cases(client_id: str) -> list[dict[str, Any]]:
     """Cases with their latest completed score and total eval count."""
     with _lock:
-        rows = connect().execute(
-            "SELECT c.id, c.title, c.created_at,"
-            " (SELECT e.score FROM evals e WHERE e.case_id = c.id AND e.status = 'completed'"
-            "  ORDER BY e.created_at DESC LIMIT 1) AS latest_score,"
-            " (SELECT COUNT(*) FROM evals e WHERE e.case_id = c.id) AS eval_count"
-            " FROM cases c WHERE c.client_id = ? ORDER BY c.created_at DESC",
-            (client_id,),
-        ).fetchall()
+        rows = (
+            connect()
+            .execute(
+                "SELECT c.id, c.title, c.created_at,"
+                " (SELECT e.score FROM evals e"
+                "  WHERE e.case_id = c.id AND e.status = 'completed'"
+                "  ORDER BY e.created_at DESC LIMIT 1) AS latest_score,"
+                " (SELECT COUNT(*) FROM evals e WHERE e.case_id = c.id) AS eval_count"
+                " FROM cases c WHERE c.client_id = ? ORDER BY c.created_at DESC",
+                (client_id,),
+            )
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -287,11 +357,16 @@ def list_evals(case_id: str) -> list[dict[str, Any]]:
     """Eval history for one case, oldest first — so the score trend reads
     left-to-right as the agent learns."""
     with _lock:
-        rows = connect().execute(
-            "SELECT id, engagement_id, status, score, detail, created_at, completed_at"
-            " FROM evals WHERE case_id = ? ORDER BY created_at",
-            (case_id,),
-        ).fetchall()
+        rows = (
+            connect()
+            .execute(
+                "SELECT id, engagement_id, status, score, detail,"
+                " created_at, completed_at"
+                " FROM evals WHERE case_id = ? ORDER BY created_at",
+                (case_id,),
+            )
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -299,7 +374,8 @@ def append_event(engagement_id: str, event_type: str, payload: dict[str, Any]) -
     with _lock:
         conn = connect()
         row = conn.execute(
-            "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events WHERE engagement_id = ?",
+            "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events"
+            " WHERE engagement_id = ?",
             (engagement_id,),
         ).fetchone()
         seq = int(row["next"])
@@ -314,11 +390,15 @@ def append_event(engagement_id: str, event_type: str, payload: dict[str, Any]) -
 
 def list_events(engagement_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
     with _lock:
-        rows = connect().execute(
-            "SELECT seq, type, payload, created_at FROM events"
-            " WHERE engagement_id = ? AND seq > ? ORDER BY seq",
-            (engagement_id, after_seq),
-        ).fetchall()
+        rows = (
+            connect()
+            .execute(
+                "SELECT seq, type, payload, created_at FROM events"
+                " WHERE engagement_id = ? AND seq > ? ORDER BY seq",
+                (engagement_id, after_seq),
+            )
+            .fetchall()
+        )
     return [
         {
             "seq": r["seq"],

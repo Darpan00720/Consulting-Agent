@@ -112,7 +112,8 @@ async def run_case_eval(
             reflection = await call(
                 "reflector",
                 REFLECTION_SYSTEM,
-                "# Gaps a grader found comparing the report to the official model answer\n\n"
+                "# Gaps a grader found comparing the report to the official"
+                " model answer\n\n"
                 + "\n".join(f"- {item}" for item in missed)
                 + "\n\nExtract the durable process lessons (method only, no case "
                 "facts). Output `LESSON: ...` lines, or NONE.",

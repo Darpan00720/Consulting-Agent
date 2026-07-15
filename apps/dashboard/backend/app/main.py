@@ -17,18 +17,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import config, db
+from app.pipeline.engine import recover_interrupted
 from app.routers import cases, engagements, lessons
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.connect()
+    # Adopt runs a previous process left paused/running, so a redeploy doesn't
+    # strand them on a countdown that will never fire.
+    await recover_interrupted()
     yield
 
 
 app = FastAPI(
     title="StratAgent Dashboard API",
-    version="0.2.0",
+    # Single source of truth: the repo-root VERSION file. Keep in sync.
+    version="1.0.0-beta.1",
     description="Run governed AI consulting engagements from the browser.",
     lifespan=lifespan,
 )

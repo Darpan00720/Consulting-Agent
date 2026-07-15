@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Darpan
     email: darpan20071992@gmail.com
-version: 0.1.0-rc2
-date-released: "2026-07-10"
+version: 1.0.0-beta.1
+date-released: "2026-07-15"
 license: MIT
 abstract: >-
   StratAgent is an AI management-consulting platform, packaged as a Claude Code
