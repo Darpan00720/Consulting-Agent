@@ -18,6 +18,17 @@ COPY apps/dashboard/backend/app ./app
 COPY plugins/ruflo-stratagent/agents /agents
 COPY knowledge-vault /vault
 
+# Operational telemetry core, imported by app/telemetry_bridge.py.
+# NOTE: packages/telemetry is NOT independently importable — it depends on
+# state -> common -> core (telemetry/events.py: `from state.identifiers import
+# new_event_id`). So the whole packages/ tree is copied and put on PYTHONPATH,
+# exactly mirroring how a source checkout resolves it (no "works locally,
+# breaks in Docker" gap). Only telemetry's closure is ever imported; the rest
+# is inert text. That the core cannot be taken a piece at a time is evidence
+# for the unify-or-retire question tracked in ADR-008.
+COPY packages ./packages
+ENV PYTHONPATH=/app/packages
+
 # SQLite lives here and is backed by a named volume (see docker-compose.yml).
 # The directory must exist in the image AND be owned by the runtime user: a
 # fresh named volume inherits ownership from the image path it covers, so

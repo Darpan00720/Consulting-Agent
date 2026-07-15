@@ -7,6 +7,7 @@ The server holds the provider keys; users need no key to run cases.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 os.environ["STRATAGENT_MOCK"] = "1"
@@ -150,6 +151,116 @@ def test_concurrency_cap_limits_simultaneous_engagements(tmp_path, monkeypatch):
 
     admitted = asyncio.run(drive())
     assert admitted <= 2, f"{admitted} engagements ran at once, cap was 2"
+    db.reset_for_tests()
+
+
+def test_telemetry_records_spans_for_every_phase_and_analyst(tmp_path, monkeypatch):
+    """The dashboard emits real operational telemetry via packages/telemetry.
+
+    Before this wiring the shipping product had none — incidents were diagnosed
+    by grepping docker logs. Spans must cover each phase AND each analyst (the
+    analysts are the slow stretch an operator needs visibility into).
+    """
+    from app import telemetry_bridge
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "tel.db")
+    monkeypatch.setattr(config, "TELEMETRY_ENABLED", True)
+    monkeypatch.setattr(config, "TELEMETRY_DIR", str(tmp_path / "telemetry"))
+    monkeypatch.setattr(config, "TELEMETRY_SAMPLE_RATE", 1.0)
+    telemetry_bridge.reset_for_tests()
+    db.reset_for_tests()
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=fake_call))
+
+    trace = tmp_path / "telemetry" / f"{eid}.jsonl"
+    assert trace.exists(), "no telemetry trace written for the engagement"
+    events = [json.loads(line) for line in trace.read_text().splitlines() if line]
+    agents = {e["agent_name"] for e in events}
+    phases = {e["phase"] for e in events}
+
+    # every analyst got its own span
+    assert set(ANALYSTS) <= agents, f"analysts missing from telemetry: {agents}"
+    # and the governance phases are visible to an operator
+    assert {"review", "challenge", "reporting"} <= phases
+    # spans carry real durations and terminal statuses
+    finished = [e for e in events if e["status"] == "finished"]
+    assert finished and all(e["duration_ms"] is not None for e in finished)
+    telemetry_bridge.reset_for_tests()
+    db.reset_for_tests()
+
+
+def test_telemetry_feeds_the_cores_quality_analytics(tmp_path, monkeypatch):
+    """The dashboard's traces must be consumable by the core's analytics, not
+    just well-formed. quality_analytics() computes reviewer_pass_rate from
+    metadata['verdict'] on terminal REVIEW events — pin that contract, since a
+    silent break turns the ops dashboard into zeros that look like health."""
+    from app import telemetry_bridge
+    from telemetry import JSONLSink, quality_analytics
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "qual.db")
+    monkeypatch.setattr(config, "TELEMETRY_ENABLED", True)
+    monkeypatch.setattr(config, "TELEMETRY_DIR", str(tmp_path / "telemetry"))
+    monkeypatch.setattr(config, "TELEMETRY_SAMPLE_RATE", 1.0)
+    telemetry_bridge.reset_for_tests()
+    db.reset_for_tests()
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands_with_caveats"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=fake_call))
+
+    events = JSONLSink(tmp_path / "telemetry").read(eid)
+    analytics = quality_analytics(events)
+    # The governance outcome is legible to the core's analytics, not zeros.
+    assert analytics.reviewer_pass_rate == 1.0
+    assert analytics.challenger_intervention_rate == 1.0  # stands_with_caveats
+    assert analytics.needs_rework_frequency == 0.0
+    telemetry_bridge.reset_for_tests()
+    db.reset_for_tests()
+
+
+def test_telemetry_failure_never_breaks_an_engagement(tmp_path, monkeypatch):
+    """Observability is best-effort. If the recorder explodes, the engagement
+    must still complete — telemetry may never become load-bearing."""
+    from app import telemetry_bridge
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "telfail.db")
+    telemetry_bridge.reset_for_tests()
+    db.reset_for_tests()
+
+    class Exploding:
+        def span(self, **kw):
+            raise RuntimeError("sink on fire")
+
+        def emit(self, **kw):
+            raise RuntimeError("sink on fire")
+
+    monkeypatch.setattr(telemetry_bridge, "recorder", lambda: Exploding())
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=fake_call))
+    assert db.get_engagement(eid)["status"] == "completed"
+    telemetry_bridge.reset_for_tests()
     db.reset_for_tests()
 
 

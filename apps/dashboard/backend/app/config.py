@@ -81,6 +81,19 @@ MAX_REWORK = int(os.environ.get("STRATAGENT_MAX_REWORK", "1"))
 # Useful for demos, local frontend work, and tests.
 MOCK_MODE = os.environ.get("STRATAGENT_MOCK", "") == "1"
 
+# Operational telemetry (packages/telemetry, wired via app/telemetry_bridge.py).
+# Separate from the domain event log: this is for OPERATORS (durations, retries,
+# failures), is sampled and redacted, and may be dropped without affecting an
+# engagement. One JSONL file per engagement under TELEMETRY_DIR.
+#   TELEMETRY_ENABLED — kill switch.
+#   TELEMETRY_DIR — output root; empty disables writing (NullSink).
+#   TELEMETRY_SAMPLE_RATE — 0.0–1.0; 1.0 records everything.
+TELEMETRY_ENABLED = os.environ.get("STRATAGENT_TELEMETRY", "1") == "1"
+TELEMETRY_DIR = os.environ.get("STRATAGENT_TELEMETRY_DIR", "") or str(
+    DB_PATH.parent / "telemetry"
+)
+TELEMETRY_SAMPLE_RATE = float(os.environ.get("STRATAGENT_TELEMETRY_SAMPLE", "1.0"))
+
 # Max engagements running their LLM pipeline at once (server-wide). Requests
 # still return 202 immediately; work beyond this waits its turn rather than
 # piling unbounded concurrent load onto the single SQLite writer and the shared

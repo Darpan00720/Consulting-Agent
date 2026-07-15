@@ -42,8 +42,10 @@ knowledge-vault/graphify-out/
 engagements/*/
 
 # Telemetry runtime output (per-engagement JSONL). Committed samples live under
-# docs/observability/samples/ — the runtime telemetry/ dir is not shipped.
-/telemetry/
+# docs/observability/samples/ — runtime telemetry dirs are never shipped.
+# NOT root-anchored: the dashboard writes its own traces next to its DB.
+telemetry/
+!docs/observability/samples/
 
 # Obsidian editor UI state inside the vault (not project content)
 knowledge-vault/.obsidian/

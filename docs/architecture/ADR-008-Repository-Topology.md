@@ -41,15 +41,25 @@ in Markdown: multi-provider failover, checkpoint/auto-resume, persistence, SSE
 streaming, BYOK, quotas. **This is what "is StratAgent production-ready?" refers
 to.** New product work happens here.
 
-### 3. `packages/` — the **reference core library (frozen)**
+### 3. `packages/` — the **reference core library**
 An event-sourced, `mypy --strict`, 954-test implementation of the engagement
 domain (state, replay, governance, knowledge, evidence, telemetry). It was built
 first, milestone-by-milestone (M0–M9, ADR-001–007), as the rigorous model of the
-domain. **It is not on the dashboard's execution path today.** It is retained as:
-(a) the executable specification the dashboard's behaviour is checked against by
-humans, (b) the substrate for a future non-dashboard runtime (e.g. a hardened
-API server), and (c) the home of subsystems (replay, telemetry) not yet wired
-into the dashboard.
+domain.
+
+**Partially on the execution path as of 1.0.0-beta.1.** `packages/telemetry` is
+now imported by the dashboard (`app/telemetry_bridge.py`) and is the shipping
+product's only source of operational observability. The rest (state, replay,
+governance, knowledge, evidence) remains off the path, retained as: (a) the
+executable specification the dashboard is checked against by humans, and (b) the
+substrate for a future non-dashboard runtime.
+
+**Wiring telemetry produced hard evidence for the open question below:**
+`packages/telemetry` **cannot be taken on its own** — it imports
+`state.identifiers.new_event_id`, pulling in `state` → `common` → `core`. The
+dashboard image ships the entire `packages/` tree on `PYTHONPATH` to import one
+subsystem. The core is not modular at the package boundary; it is modular only
+as a whole. Any future extraction faces the same closure problem.
 
 ## Consequences
 
@@ -90,3 +100,17 @@ should not block a limited beta, and deletion discards genuinely valuable work.
 This question **must be answered before a 1.0.0 (non-beta) release** — carrying
 two divergent governance implementations into general availability is not
 acceptable long-term. Tracked in `ROADMAP.md`.
+
+**Update (1.0.0-beta.1) — the decision moved toward option 1.** Rather than let
+`packages/` sit entirely unused, its most valuable unwired subsystem
+(`telemetry`) was wired into the dashboard. This:
+* gave the shipping product real observability it previously lacked entirely;
+* proved the seam works — the dashboard's live traces are consumed by the
+  core's own `scripts/engagement_telemetry.py` analytics unmodified;
+* **retired option 2 (delete).** The core is now load-bearing for production
+  observability; deleting it would regress the product.
+
+The remaining choice is therefore between **(1) full unification** and a
+long-lived hybrid. The telemetry closure problem (above) is the main obstacle
+and should be the first thing addressed if (1) is pursued: the core needs real
+package boundaries before it can be adopted piecemeal.

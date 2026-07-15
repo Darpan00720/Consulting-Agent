@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app import config, db
+from app import telemetry_bridge as telemetry
 from app.events import bus
 from app.pipeline import prompts
 from app.pipeline.claude import call_agent, friendly_error
@@ -369,6 +370,7 @@ async def _run_engagement(
         system_override: str | None = None,
         checkpoint: bool = True,
         images: list[str] | None = None,
+        signals: Callable[[str], dict[str, Any]] | None = None,
         **kw: Any,
     ) -> str:
         # Resume: a checkpointed phase already completed in an earlier pass —
@@ -378,15 +380,23 @@ async def _run_engagement(
         await _emit(engagement_id, "phase_started", {"phase": name, "agent": agent})
         started = time.monotonic()
         system = system_override or prompts.agent_system_prompt(agent)
-        result = await call(
-            agent,
-            system,
-            user_message,
-            api_key=api_key,
-            model=model,
-            images=images,
-            **kw,
-        )
+        # Operational span (separate from the domain event above): records real
+        # wall time and FAILED on exception, for operators. Never load-bearing.
+        # `signals` derives metadata from the result (e.g. a governance verdict)
+        # and rides this span's single terminal event — emitting a second event
+        # instead would double-count in the core's analytics.
+        with telemetry.span(engagement_id, agent, name) as handle:
+            result = await call(
+                agent,
+                system,
+                user_message,
+                api_key=api_key,
+                model=model,
+                images=images,
+                **kw,
+            )
+            if signals is not None:
+                telemetry.attach(handle, **signals(result))
         await _emit(
             engagement_id,
             "phase_completed",
@@ -537,20 +547,24 @@ async def _run_engagement(
                 return analyst_cache[agent]
             await _emit(engagement_id, "analyst_started", {"agent": agent})
             started = time.monotonic()
-            result = await call(
-                agent,
-                prompts.agent_system_prompt(agent),
-                analyst_base_context
-                + f"\n\nAnswer only the issue-tree branches owned by the {agent}. "
-                "Produce concise, quantified analysis. Label every assumption "
-                "with a sequentially numbered ID: `[ASSUMPTION AL-1: ...]`, "
-                "`[ASSUMPTION AL-2: ...]`, and so on — never output a literal "
-                "placeholder like 'AL-xx'. Keep total response under 500 words.",
-                api_key=api_key,
-                model=model,
-                images=images,
-                max_tokens=2000,
-            )
+            # The 5 analysts are the longest stretch of an engagement and the
+            # likeliest place to exhaust a rate limit — per-analyst spans are
+            # what let an operator see WHICH one is slow or failing.
+            with telemetry.span(engagement_id, agent, "analysis"):
+                result = await call(
+                    agent,
+                    prompts.agent_system_prompt(agent),
+                    analyst_base_context
+                    + f"\n\nAnswer only the issue-tree branches owned by the {agent}. "
+                    "Produce concise, quantified analysis. Label every assumption "
+                    "with a sequentially numbered ID: `[ASSUMPTION AL-1: ...]`, "
+                    "`[ASSUMPTION AL-2: ...]`, and so on — never output a literal "
+                    "placeholder like 'AL-xx'. Keep total response under 500 words.",
+                    api_key=api_key,
+                    model=model,
+                    images=images,
+                    max_tokens=2000,
+                )
             await _emit(
                 engagement_id,
                 "analyst_completed",
@@ -658,6 +672,15 @@ async def _run_engagement(
                 "whose confidence is unjustified. Verdict: approved / needs_rework.",
                 checkpoint=False,
                 max_tokens=2000,
+                # Governance outcome rides this span's terminal event: the
+                # core's quality_analytics reads metadata["verdict"] off
+                # terminal REVIEW events to compute reviewer_pass_rate.
+                signals=lambda text: {
+                    "verdict": _reviewer_verdict(text),
+                    "validation_status": (
+                        "passed" if _reviewer_verdict(text) == "approved" else "blocked"
+                    ),
+                },
             )
             review_verdict = _reviewer_verdict(review)
             await _emit(
@@ -712,6 +735,14 @@ async def _run_engagement(
             "`VERDICT: stands_with_caveats` or `VERDICT: needs_rework`.",
             checkpoint=False,
             max_tokens=2000,
+            signals=lambda text: {
+                "verdict": _challenger_verdict(text),
+                "validation_status": (
+                    "blocked"
+                    if _challenger_verdict(text) == "needs_rework"
+                    else "passed"
+                ),
+            },
         )
         challenge_verdict = _challenger_verdict(challenge)
         await _emit(engagement_id, "challenge_verdict", {"verdict": challenge_verdict})
@@ -833,6 +864,16 @@ async def _run_engagement(
         # Every provider is rate-limited at once. Don't fail — the work so far
         # is checkpointed in events. Pause, wait for the soonest refill, and
         # resume from where we stopped. The user sees a countdown, not an error.
+        # RETRIED (not FAILED) is the honest operational signal: capacity ran
+        # out, the run is intact. Pause rate is the metric to alert on.
+        telemetry.emit(
+            engagement_id,
+            "engagement-manager",
+            "orchestration",
+            "retried",
+            retry_count=resume_count + 1,
+            metadata={"reason": "all_providers_rate_limited"},
+        )
         await _pause_and_resume(
             engagement_id,
             exc,
@@ -846,6 +887,16 @@ async def _run_engagement(
 
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
         message = friendly_error(exc)
+        # Operational signal: exception TYPE only, never the message (it can
+        # carry case content). The redactor guards metadata, but not sending it
+        # is stronger than trusting the guard.
+        telemetry.emit(
+            engagement_id,
+            "engagement-manager",
+            "orchestration",
+            "failed",
+            metadata={"error_type": type(exc).__name__},
+        )
         db.set_engagement_status(engagement_id, "failed", error=message)
         await _emit(engagement_id, "engagement_failed", {"error": message})
 
