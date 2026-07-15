@@ -100,6 +100,37 @@ contracts are in [ADR-005](docs/architecture/ADR-005-Agent-Specifications.md).
 
 ## Installation
 
+There are **two ways to run StratAgent**. Both run the same 16 agents and the
+same governed knowledge vault — pick whichever fits you.
+
+### A. The web dashboard — no Claude Code needed
+
+The lowest-friction path. Requires only **Docker**.
+
+```bash
+cd apps/dashboard
+STRATAGENT_MOCK=1 docker compose up --build     # → http://localhost:3000
+```
+
+Mock mode runs the **whole** lifecycle with canned outputs — no API key, no
+signup, instant. To run real engagements, add at least one free provider key to
+`apps/dashboard/.env` and drop the `STRATAGENT_MOCK=1`:
+
+```bash
+GEMINI_API_KEY=AIza...       # https://aistudio.google.com/apikey  (best free tier)
+CEREBRAS_API_KEY=csk-...     # https://cloud.cerebras.ai           (optional, recommended)
+```
+
+Any subset works; providers without a key are skipped. A real engagement takes
+~5–7 minutes on free keys, and if every provider hits its rate limit the run
+**pauses and auto-resumes** rather than failing. You can also paste your own key
+(Anthropic / OpenAI / OpenRouter / Cerebras / Groq / Google) straight into the
+UI — it's used for that run only and never stored.
+
+Full options: [`apps/dashboard/README.md`](apps/dashboard/README.md).
+
+### B. The Claude Code plugin
+
 Requires **Python ≥ 3.12**, **[uv](https://docs.astral.sh/uv/)**, and **Claude Code**.
 
 ```bash

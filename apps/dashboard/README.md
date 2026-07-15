@@ -1,15 +1,19 @@
 # StratAgent Dashboard
 
 A web app for running StratAgent consulting engagements from the browser.
-**No accounts, no signup**: paste a business problem, optionally add your own
-Anthropic API key (kept in your browser), watch the engagement lifecycle run
-live (classify → scope → plan → frame → issue tree → 5 analysts in parallel →
-reviewer → challenger → report), and get an executive-ready markdown report.
+**No accounts, no signup**: paste a business problem (and paste in charts or
+screenshots if you have them), watch the engagement run live (classify → scope →
+plan → frame → issue tree → 5 specialist analysts → reconcile → reviewer →
+challenger → report), and get an executive-ready markdown report.
+
+Runs on a **multi-provider free tier** (Gemini, Cerebras, OpenRouter, GitHub
+Models, Cloudflare) with automatic failover — or on **your own key** from any
+supported provider.
 
 ```
 apps/dashboard/
-  backend/    FastAPI + Anthropic Python SDK  (port 8000)
-  frontend/   Next.js 15 + React 19           (port 3000)
+  backend/    FastAPI + OpenAI-compatible provider chain  (port 8000)
+  frontend/   Next.js 15 + React 19                       (port 3000)
 ```
 
 The backend loads the **same agent prompts** the Claude Code plugin uses
@@ -40,42 +44,109 @@ limit, …) — never the raw SDK JSON error.
 
 ## Quick start
 
-**Backend** (needs `uv`):
+### 1. Try it with zero setup (no API key, no signup)
+
+Mock mode runs the **entire** pipeline with canned outputs — instant, free, and
+enough to see the whole lifecycle and UI:
 
 ```bash
-cd apps/dashboard/backend
-export ANTHROPIC_API_KEY=sk-ant-...   # or `ant auth login`
-uv run uvicorn app.main:app --port 8000
+cd apps/dashboard
+STRATAGENT_MOCK=1 docker compose up --build
+# → http://localhost:3000
 ```
 
-**Frontend** (needs Node 18+):
+### 2. Run real engagements (free provider keys)
+
+Create `apps/dashboard/.env` with **at least one** provider key — every key is
+optional and any subset works; providers without a key are simply skipped:
 
 ```bash
-cd apps/dashboard/frontend
-npm install
-npm run dev        # http://localhost:3000
+# apps/dashboard/.env
+GEMINI_API_KEY=AIza...          # https://aistudio.google.com/apikey  (best free tier)
+CEREBRAS_API_KEY=csk-...        # https://cloud.cerebras.ai          (handles big prompts)
+OPENROUTER_API_KEY=sk-or-...    # https://openrouter.ai/keys
 ```
 
-**Try it without an API key** — mock mode runs the full pipeline with canned
-outputs (no Claude calls, instant):
+```bash
+cd apps/dashboard
+docker compose up --build       # → http://localhost:3000
+```
+
+A full engagement takes ~5–7 minutes on free keys. If every provider hits its
+rate limit, the engagement **pauses and auto-resumes** from its last completed
+step — you never lose work or need to re-run.
+
+> **Scaling tip.** Free quota is metered per *project* (Gemini) or per
+> *organization* (Cerebras), so several independent keys multiply capacity.
+> List them comma-separated — each becomes its own paced chain entry:
+> `GEMINI_API_KEY=key_project1,key_project2,key_project3`
+> Keys from the *same* project/org share one quota and will only cause 429s.
+
+### 3. Or bring your own key (no server keys needed)
+
+Paste any supported key into the UI — Anthropic, OpenAI, OpenRouter, Cerebras,
+Groq, or Google. The whole run uses that provider's top model, bypasses the
+free-tier quota, and the key **never leaves the request** (never stored, never
+logged).
+
+### Local dev without Docker
 
 ```bash
-STRATAGENT_MOCK=1 uv run uvicorn app.main:app --port 8000
+cd apps/dashboard/backend && uv run --extra dev pytest   # 67 tests, mock mode
+cd apps/dashboard/backend && uv run uvicorn app.main:app --port 8000
+cd apps/dashboard/frontend && npm install && npm run dev
 ```
 
 ## Configuration (environment variables)
 
+**Provider keys** — any subset; each may be a comma-separated list (see the
+scaling tip above). The chain order is Gemini → Cerebras → OpenRouter → GitHub
+Models → Cloudflare, with automatic failover.
+
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Google AI Studio. Best free tier; reads pasted charts. |
+| `CEREBRAS_API_KEY` | Cerebras. 30k TPM — serves the large reconcile/report prompts. |
+| `OPENROUTER_API_KEY` | OpenRouter free models. |
+| `GITHUB_MODELS_TOKEN` / `GITHUB_TOKEN` | GitHub PAT with the `models: read` scope. |
+| `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` | Workers AI — **both** required (the id is in the URL). |
+
+**Behaviour**
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Claude API credentials (or an `ant auth login` profile) |
-| `STRATAGENT_MODEL` | `claude-opus-4-8` | Model for all agent calls |
 | `STRATAGENT_MOCK` | off | `1` = canned outputs, no API calls |
-| `STRATAGENT_DAILY_QUOTA` | `5` | Engagements per user per 24 h |
-| `STRATAGENT_MAX_TOKENS` | `16000` | Per-agent output budget |
-| `STRATAGENT_REPORT_MAX_TOKENS` | `32000` | Report-writer output budget |
-| `STRATAGENT_DB` | `backend/dashboard.db` | SQLite path |
+| `STRATAGENT_DAILY_QUOTA` | `5` | Free-tier engagements per client id / 24 h |
+| `STRATAGENT_MAX_TOKENS` | `4096` | Per-agent output budget |
+| `STRATAGENT_REPORT_MAX_TOKENS` | `8192` | Report-writer output budget |
+| `STRATAGENT_MAX_REWORK` | `1` | Reviewer→reconcile retries before an interim report |
+| `STRATAGENT_MAX_CONCURRENT` | `8` | Engagements running at once (server-wide) |
+| `STRATAGENT_DB` | `backend/dashboard.db` | SQLite path (Docker: `/app/data/dashboard.db`) |
 | `STRATAGENT_CORS_ORIGINS` | `http://localhost:3000` | Allowed frontend origins |
 | `NEXT_PUBLIC_API_URL` (frontend) | `http://localhost:8000` | Backend base URL |
+
+**Auto-resume** (rate-limit resilience)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `STRATAGENT_AUTO_RESUME` | `1` | Kill switch for pause-and-resume |
+| `STRATAGENT_MAX_AUTO_RESUMES` | `6` | Give up after this many automatic retries |
+| `STRATAGENT_MIN_RESUME_DELAY` / `STRATAGENT_MAX_RESUME_DELAY` | `20` / `900` | Backoff bounds (seconds, exponential + jittered) |
+
+**Telemetry** (operational; separate from the domain event log)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `STRATAGENT_TELEMETRY` | `1` | Kill switch |
+| `STRATAGENT_TELEMETRY_DIR` | next to the DB | One JSONL trace per engagement |
+| `STRATAGENT_TELEMETRY_SAMPLE` | `1.0` | Sample rate, 0.0–1.0 |
+
+Read traces with the core's analytics CLI:
+
+```bash
+uv run python scripts/engagement_telemetry.py --all --root <telemetry-dir>
+uv run python scripts/engagement_telemetry.py --all --root <dir> --quality
+```
 
 ## API
 

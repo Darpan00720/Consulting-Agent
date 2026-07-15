@@ -23,6 +23,10 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
       GITHUB_MODELS_MODEL: ${GITHUB_MODELS_MODEL:-}
       CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-}
+      # Zero-setup demo path: `STRATAGENT_MOCK=1 docker compose up` runs the
+      # whole pipeline with canned outputs and needs no API key. Must be
+      # forwarded explicitly — compose does not pass the host env through.
+      STRATAGENT_MOCK: ${STRATAGENT_MOCK:-}
       STRATAGENT_DAILY_QUOTA: ${STRATAGENT_DAILY_QUOTA:-5}
       STRATAGENT_AGENTS_DIR: /agents
       STRATAGENT_VAULT_DIR: /vault
