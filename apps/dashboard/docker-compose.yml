@@ -25,6 +25,22 @@ services:
       CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-}
       # Operator console gate. Unset => /api/admin/* 404s entirely.
       STRATAGENT_ADMIN_TOKEN: ${STRATAGENT_ADMIN_TOKEN:-}
+      # --- public-deployment settings (see DEPLOY.md; harmless locally) ------
+      # Where the browser app is served from. The default only covers localhost,
+      # so a deployed frontend is CORS-blocked until this names its real URL.
+      STRATAGENT_CORS_ORIGINS: ${STRATAGENT_CORS_ORIGINS:-}
+      # Abuse control. The per-browser quota is caller-asserted and therefore a
+      # courtesy limit; the per-IP one is what actually protects the shared
+      # provider quota.
+      STRATAGENT_DAILY_IP_QUOTA: ${STRATAGENT_DAILY_IP_QUOTA:-}
+      # Pins the IP-quota hash across restarts. Unset => new salt each boot =>
+      # quotas reset on every deploy.
+      STRATAGENT_IP_SALT: ${STRATAGENT_IP_SALT:-}
+      # Set to 1 ONLY behind a real reverse proxy (Railway/Fly/Render/nginx).
+      # X-Forwarded-For is caller-supplied: trusting it while directly exposed
+      # reopens the exact bypass the IP quota closes.
+      STRATAGENT_TRUST_PROXY: ${STRATAGENT_TRUST_PROXY:-}
+      STRATAGENT_MAX_CONCURRENT: ${STRATAGENT_MAX_CONCURRENT:-}
       # Zero-setup demo path: `STRATAGENT_MOCK=1 docker compose up` runs the
       # whole pipeline with canned outputs and needs no API key. Must be
       # forwarded explicitly — compose does not pass the host env through.

@@ -16,11 +16,12 @@ headers). Two ways to run a case:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -45,6 +46,33 @@ def client_id(
     if not raw or not _CLIENT_ID_RE.match(raw):
         raise HTTPException(status_code=400, detail="Missing or invalid client id")
     return raw
+
+
+def _source_ip(request: Request) -> str:
+    """The caller's IP, as trustworthy as the deployment allows.
+
+    X-Forwarded-For is caller-supplied, so it is honoured ONLY when
+    ``STRATAGENT_TRUST_PROXY=1`` says a reverse proxy really is in front. Then
+    the LAST entry is the one our own proxy observed and appended; the earlier
+    entries are whatever the client chose to claim, and trusting those would
+    reopen the exact bypass this quota exists to close.
+    """
+    if config.TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return request.client.host if request.client else "unknown"
+
+
+def source_fingerprint(request: Request) -> str:
+    """Salted hash of the caller's IP — a spoof-resistant quota key.
+
+    Hashed, never stored raw: an IP is PII and this product holds nothing about
+    its users. The salt makes the digest useless outside this deployment.
+    """
+    ip = _source_ip(request)
+    return hashlib.sha256(f"{config.IP_HASH_SALT}:{ip}".encode()).hexdigest()[:32]
 
 
 class CreateEngagementRequest(BaseModel):
@@ -93,11 +121,17 @@ class EngagementSummary(BaseModel):
 
 @router.post("", status_code=202)
 async def create_engagement(
-    body: CreateEngagementRequest, cid: str = Depends(client_id)
+    body: CreateEngagementRequest,
+    request: Request,
+    cid: str = Depends(client_id),
 ) -> dict[str, Any]:
     model = body.model
     if model is not None and not config.is_allowed_model(model):
         raise HTTPException(status_code=422, detail=f"Unsupported model: {model}")
+
+    # Hash the source even for BYOK runs, so the column is populated for the
+    # operator view — but only free runs are counted against the IP quota.
+    ip_hash = source_fingerprint(request)
 
     byok = bool(body.api_key)
     if byok:
@@ -123,11 +157,28 @@ async def create_engagement(
                 "engagements/24h). Try again tomorrow — or add your own API key "
                 "for unlimited premium runs.",
             )
+        # The client id above is caller-asserted, so that quota alone is a
+        # courtesy limit: send a fresh id per request and it never triggers.
+        # This one keys off something the caller cannot choose, and is what
+        # actually protects the shared provider quota on a public deployment.
+        if (
+            config.DAILY_IP_QUOTA > 0
+            and db.engagements_today_from_ip(ip_hash) >= config.DAILY_IP_QUOTA
+        ):
+            raise HTTPException(
+                status_code=429,
+                detail="Daily free-tier limit reached for this network "
+                f"({config.DAILY_IP_QUOTA} engagements/24h). Add your own API key "
+                "to keep going — your key is used for that run only and is never "
+                "stored.",
+            )
 
     try:
         # used_byok records THAT a user key was used, never the key itself —
         # it lets restart recovery skip runs it cannot legitimately resume.
-        engagement_id = db.create_engagement(cid, body.case_prompt, used_byok=byok)
+        engagement_id = db.create_engagement(
+            cid, body.case_prompt, used_byok=byok, ip_hash=ip_hash
+        )
     except Exception as exc:  # noqa: BLE001 — return a clean, CORS-safe error
         # An unhandled 500 loses its CORS headers, so the browser only sees
         # "Failed to fetch". Convert storage failures into a proper HTTP error.

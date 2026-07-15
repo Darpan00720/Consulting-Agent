@@ -858,6 +858,135 @@ def test_public_benchmark_and_lessons_routes_are_gone(client):
     assert client.get("/api/lessons", headers=CID_A).status_code == 404
 
 
+STRUCTURED_CASE = """Client: A premium European coffee chain, 320 stores.
+Annual Revenue: EUR640M. Current Profit: EUR32M.
+
+Section 1 - Problem Structuring
+
+Question 1
+
+How would you structure the problem?
+
+Question 2
+
+What hypotheses would you develop before requesting data?
+
+Section 10 - Quantitative Analysis
+
+Question 38
+
+Each store serves 600 customers/day.
+Traffic falls 8%.
+Average ticket is EUR9.
+Estimate annual revenue impact.
+
+Question 39
+
+Delivery commissions equal 28%.
+Store margin is 18%.
+Is delivery profitable?
+
+Question 50
+
+The CEO asks, "What would you do if this were your own company?"
+How would you answer?
+"""
+
+
+def test_extracts_the_questions_the_client_actually_asked():
+    """A structured case interview is a question list, not a narrative brief.
+
+    Regression from a real run: a 50-question case produced a fluent memo that
+    answered ~5 of them, and the reviewer approved — because it graded coverage
+    against the issue tree, which the pipeline generates itself.
+    """
+    asked = prompts.explicit_questions(STRUCTURED_CASE)
+    assert len(asked) == 5, asked
+
+    # Multi-line arithmetic asks must survive INTACT, with their numbers — a
+    # naive "lines ending in ?" scan drops them (Q38 ends in a period) and those
+    # are exactly the questions with one verifiable right answer.
+    q38 = next(q for q in asked if "600 customers" in q)
+    assert "8%" in q38 and "EUR9" in q38 and "Estimate annual revenue impact" in q38
+
+    # Section headers must not leak in as questions.
+    assert not any(q.lower().startswith("section") for q in asked)
+    # A judgement question keeps its full text.
+    assert any("your own company" in q for q in asked)
+
+    checklist = prompts.question_checklist(STRUCTURED_CASE)
+    assert checklist.startswith("Q1.") and "Q5." in checklist
+
+
+def test_narrative_brief_does_not_trigger_the_question_checklist():
+    """The Readmio/bookstore shape — prose with an embedded question — must
+    still run the normal issue-tree pipeline, not a Q&A checklist."""
+    assert prompts.question_checklist(CASE) == ""
+    assert len(prompts.explicit_questions(CASE)) < prompts.EXPLICIT_QUESTION_THRESHOLD
+
+
+def test_structured_case_puts_the_questions_in_front_of_every_gate(
+    tmp_path, monkeypatch
+):
+    """The client's questions must reach the issue tree, the reconciliation, the
+    reviewer AND the report-writer. The reviewer especially: judging coverage by
+    our own issue tree is grading our own homework."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "asked.db")
+    db.reset_for_tests()
+    seen: dict[str, str] = {}
+
+    async def fake_call(agent, system, user, **kw):
+        seen[agent] = user
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", STRUCTURED_CASE)
+    asyncio.run(run_engagement(eid, STRUCTURED_CASE, call=fake_call))
+
+    marker = "QUESTIONS THE CLIENT ASKED"
+    for agent in (
+        "issue-tree-generator",
+        "engagement-manager",
+        "reviewer",
+        "report-writer",
+    ):
+        assert marker in seen[agent], f"{agent} never saw the client's questions"
+
+    # The reviewer is told, explicitly, that coverage outranks its other checks.
+    assert "COVERAGE OF THE CLIENT'S QUESTIONS" in seen["reviewer"]
+    assert "needs_rework" in seen["reviewer"]
+    # The report-writer is told to answer them and to show arithmetic.
+    assert "Answer EVERY ONE" in seen["report-writer"]
+    assert "SHOW THE CALCULATION" in seen["report-writer"]
+    db.reset_for_tests()
+
+
+def test_narrative_brief_leaves_the_gates_unchanged(tmp_path, monkeypatch):
+    """No checklist => no coverage instructions anywhere. The existing pipeline
+    behaviour for prose briefs must not shift."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "narr.db")
+    db.reset_for_tests()
+    seen: dict[str, str] = {}
+
+    async def fake_call(agent, system, user, **kw):
+        seen[agent] = user
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=fake_call))
+    for agent in ("issue-tree-generator", "reviewer", "report-writer"):
+        assert "QUESTIONS THE CLIENT ASKED" not in seen[agent]
+    assert "COVERAGE OF THE CLIENT'S QUESTIONS" not in seen["reviewer"]
+    db.reset_for_tests()
+
+
 def test_free_tier_quota(client):
     """After DAILY_ENGAGEMENT_QUOTA runs, the next one is rate-limited."""
     for _ in range(3):
@@ -1025,3 +1154,257 @@ def test_parse_grade():
     assert missed == ["no KOL analysis", "alternatives"]
     assert _parse_grade("no structure at all") == (None, [])
     assert _parse_grade("SCORE: 400")[0] == 100  # clamped
+
+
+def test_structured_case_mandates_an_answers_section_and_budgets_for_it():
+    """The first cut of this fix failed live: reconcile built the Q1-Q11 closure
+    table and the reviewer verified coverage, but the REPORT still shipped a
+    standard memo with zero Q-numbers. The answer instruction was a paragraph
+    sitting above an enumerated section spec — and the enumerated spec won.
+
+    So the section must be part of the mandated structure, and the token budget
+    must have room for it, or the model spends the whole budget on the memo and
+    silently drops the answers.
+    """
+    from app.pipeline import prompts
+
+    asked = prompts.explicit_questions(STRUCTURED_CASE)
+    assert len(asked) >= prompts.EXPLICIT_QUESTION_THRESHOLD
+    # budget scales with the number of questions rather than a flat cap
+    budget = config.REPORT_MAX_TOKENS + 220 * len(asked)
+    assert budget > config.REPORT_MAX_TOKENS
+
+
+def test_report_writer_gets_the_answers_section_in_its_structure_spec(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "ans.db")
+    db.reset_for_tests()
+    seen: dict[str, str] = {}
+
+    async def fake_call(agent, system, user, **kw):
+        seen[agent] = user
+        if agent == "reviewer":
+            return "Verdict: approved"
+        if agent == "challenger":
+            return "Verdict: stands"
+        return f"output-of-{agent}"
+
+    eid = db.create_engagement("browser-x", STRUCTURED_CASE)
+    asyncio.run(run_engagement(eid, STRUCTURED_CASE, call=fake_call))
+    spec = seen["report-writer"]
+    # the section is mandated INSIDE the structure list, not merely requested
+    assert "## Answers to your questions" in spec
+    assert "MANDATORY" in spec
+    assert "Client question closure" in spec  # sourced from the canonical table
+
+    # and a narrative brief must not get it
+    db.reset_for_tests()
+    seen.clear()
+    eid2 = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid2, CASE, call=fake_call))
+    assert "## Answers to your questions" not in seen["report-writer"]
+    db.reset_for_tests()
+
+
+def test_ip_quota_closes_the_client_id_bypass(client, monkeypatch):
+    """X-Client-Id is caller-asserted, so the per-browser quota is a courtesy
+    limit: a fresh id per request bypasses it entirely. On a public deployment
+    that is the whole free-tier budget gone in an afternoon. The IP quota keys
+    off something the caller cannot choose.
+    """
+    monkeypatch.setattr(config, "DAILY_ENGAGEMENT_QUOTA", 2)
+    monkeypatch.setattr(config, "DAILY_IP_QUOTA", 3)
+
+    # The attack: a brand-new client id every time.
+    codes = []
+    for i in range(5):
+        r = client.post(
+            "/api/engagements",
+            json={"case_prompt": CASE},
+            headers={"X-Client-Id": f"fresh-identity-{i:04d}"},
+        )
+        codes.append(r.status_code)
+
+    assert codes[:3] == [202, 202, 202]
+    assert codes[3:] == [429, 429], f"client-id rotation was not stopped: {codes}"
+    assert (
+        "network"
+        in client.post(
+            "/api/engagements",
+            json={"case_prompt": CASE},
+            headers={"X-Client-Id": "yet-another-id-9"},
+        ).json()["detail"]
+    )
+
+
+def test_byok_runs_are_never_ip_limited(client, monkeypatch):
+    """A BYOK visitor spends their OWN provider quota, so rate-limiting them
+    protects nothing and would punish the users we most want."""
+    monkeypatch.setattr(config, "DAILY_IP_QUOTA", 1)
+    assert (
+        client.post(
+            "/api/engagements", json={"case_prompt": CASE}, headers=CID_A
+        ).status_code
+        == 202
+    )
+    # free tier for this IP is now exhausted...
+    assert (
+        client.post(
+            "/api/engagements", json={"case_prompt": CASE}, headers=CID_B
+        ).status_code
+        == 429
+    )
+    # ...but bringing your own key still works
+    for i in range(3):
+        assert (
+            client.post(
+                "/api/engagements",
+                json={"case_prompt": CASE, "api_key": "sk-ant-user-supplied-key"},
+                headers={"X-Client-Id": f"byok-visitor-{i:04d}"},
+            ).status_code
+            == 202
+        )
+
+
+def test_ip_is_hashed_never_stored_raw(client, monkeypatch):
+    """An IP is PII and this product holds nothing about its users."""
+    monkeypatch.setattr(config, "IP_HASH_SALT", "test-salt")
+    client.post("/api/engagements", json={"case_prompt": CASE}, headers=CID_A)
+    row = (
+        db.connect()
+        .execute("SELECT ip_hash FROM engagements ORDER BY created_at DESC LIMIT 1")
+        .fetchone()
+    )
+    assert row["ip_hash"] and len(row["ip_hash"]) == 32
+    raw = config.DB_PATH.read_bytes()
+    assert b"testclient" not in raw  # starlette's test peer name
+    assert b"127.0.0.1" not in raw
+
+
+def test_forwarded_for_is_ignored_unless_a_proxy_is_declared(monkeypatch):
+    """X-Forwarded-For is caller-supplied. Trusting it without a proxy in front
+    hands the attacker the very bypass the IP quota closes — they'd just spoof a
+    new XFF per request. And behind a real proxy, take the LAST hop: that is the
+    one our own proxy observed and appended; earlier entries are client-claimed.
+    """
+    from app.routers.engagements import _source_ip
+
+    class FakeRequest:
+        def __init__(self, xff, peer):
+            self.headers = {"x-forwarded-for": xff} if xff else {}
+            self.client = type("C", (), {"host": peer})()
+
+    spoofed = FakeRequest("1.2.3.4, 5.6.7.8", "10.0.0.9")
+
+    monkeypatch.setattr(config, "TRUST_PROXY", False)
+    assert _source_ip(spoofed) == "10.0.0.9", "XFF trusted with no proxy declared"
+
+    monkeypatch.setattr(config, "TRUST_PROXY", True)
+    assert _source_ip(spoofed) == "5.6.7.8", "must take the proxy-appended last hop"
+
+    # no XFF present behind a proxy → fall back to the socket peer
+    assert _source_ip(FakeRequest(None, "10.0.0.9")) == "10.0.0.9"
+
+
+def test_config_survives_the_empty_env_vars_compose_exports():
+    """docker-compose's `VAR: ${VAR:-}` — the standard way to declare an
+    optional variable — exports an EMPTY STRING, not an absent one.
+
+    This has now bitten twice: it silently blanked provider model ids, and it
+    crashed the backend at import (`int("")` -> ValueError) the moment the
+    deployment vars were added to compose. Every config read must treat empty
+    as absent, so pin it for the whole module rather than one setting.
+    """
+    import importlib
+    import os
+    import subprocess
+    import sys
+
+    empty = {
+        k: ""
+        for k in (
+            "STRATAGENT_DAILY_QUOTA",
+            "STRATAGENT_DAILY_IP_QUOTA",
+            "STRATAGENT_MAX_CONCURRENT",
+            "STRATAGENT_MAX_TOKENS",
+            "STRATAGENT_REPORT_MAX_TOKENS",
+            "STRATAGENT_MAX_REWORK",
+            "STRATAGENT_MAX_AUTO_RESUMES",
+            "STRATAGENT_MIN_RESUME_DELAY",
+            "STRATAGENT_MAX_RESUME_DELAY",
+            "STRATAGENT_TELEMETRY_SAMPLE",
+            "STRATAGENT_CORS_ORIGINS",
+            "STRATAGENT_IP_SALT",
+            "STRATAGENT_TRUST_PROXY",
+            "STRATAGENT_DB",
+            "STRATAGENT_ADMIN_TOKEN",
+        )
+    }
+    # Fresh interpreter: config resolves at import time, so re-importing in this
+    # process would not re-read the environment.
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app import config;"
+            "assert config.CORS_ORIGINS, 'CORS blanked -> browser blocked';"
+            "assert config.DAILY_IP_QUOTA > 0;"
+            "assert config.MAX_CONCURRENT_ENGAGEMENTS > 0;"
+            "assert len(config.IP_HASH_SALT) > 8;"
+            "assert config.DB_PATH.name;"
+            "print('ok')",
+        ],
+        env={**os.environ, **empty},
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        proc.returncode == 0
+    ), f"config crashed on compose's empty env vars:\n{proc.stderr[-600:]}"
+    assert "ok" in proc.stdout
+    importlib.import_module("app.config")  # keep the in-process module loaded
+
+
+def test_migration_works_on_a_pre_existing_database(tmp_path, monkeypatch):
+    """A new column's INDEX must live in _migrate(), never in _SCHEMA.
+
+    _SCHEMA runs BEFORE the migration, and on an existing database
+    `CREATE TABLE IF NOT EXISTS` is a no-op — so indexing a column added later
+    raises "no such column" and the process dies at startup. Fresh databases
+    hide this completely: only a real old-schema DB catches it (this exact bug
+    took the backend down on deploy).
+    """
+    import sqlite3
+
+    dbfile = tmp_path / "legacy.db"
+    # A database as it existed BEFORE ip_hash — no column, no index.
+    legacy = sqlite3.connect(dbfile)
+    legacy.executescript(
+        """
+        CREATE TABLE engagements (
+            id TEXT PRIMARY KEY, client_id TEXT NOT NULL, case_prompt TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued', report_md TEXT, error TEXT,
+            review_verdict TEXT, challenge_verdict TEXT, review_ready INTEGER,
+            created_at REAL NOT NULL, completed_at REAL
+        );
+        INSERT INTO engagements (id, client_id, case_prompt, status, created_at)
+        VALUES ('eng_legacy', 'old-browser', 'an older engagement', 'completed', 1.0);
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    monkeypatch.setattr(config, "DB_PATH", dbfile)
+    db.reset_for_tests()
+    conn = db.connect()  # must not raise
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(engagements)")}
+    assert {"ip_hash", "used_byok"} <= cols, "migration did not add the columns"
+    idx = {r[1] for r in conn.execute("PRAGMA index_list(engagements)")}
+    assert "idx_engagements_ip" in idx, "ip_hash index missing after migration"
+    # and the pre-existing row survived
+    assert conn.execute(
+        "SELECT case_prompt FROM engagements WHERE id='eng_legacy'"
+    ).fetchone()["case_prompt"] == "an older engagement"
+    db.reset_for_tests()

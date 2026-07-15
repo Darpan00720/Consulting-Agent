@@ -194,6 +194,20 @@ Every leaf must appear. If no analyst addressed a leaf, close it from the
 canonical ledger where possible and mark it "assumed"; if it genuinely cannot
 be closed, mark it OPEN and state what evidence would close it.
 
+## Client question closure
+ONLY when the context contains a "QUESTIONS THE CLIENT ASKED" list. One row per
+question, in the client's order — this is what the engagement is graded on, and
+it outranks the issue tree (the tree is ours; the questions are theirs).
+Columns: Q# | Question (abbreviated) | Answer (direct, quantified, self-
+contained) | Basis (canonical IDs).
+Rules: answer EVERY question. Arithmetic questions must show the computation and
+the result — recompute it yourself from the client's stated numbers rather than
+trusting an analyst's figure, and if your result disagrees with theirs, yours
+wins and you say so in Corrections applied. A judgement question ("would you
+exit Germany?") needs a committed answer, not a restatement. If a question truly
+cannot be answered from the material, mark it OPEN and say what is missing —
+never silently drop it.
+
 ## Corrections applied
 A bullet list of every collision or contradiction you resolved (ID reused,
 number in dispute, citation to a stale value) and how you resolved it.
@@ -412,6 +426,21 @@ async def _run_engagement(
 
     try:
         case = f"# Case prompt\n\n{case_prompt.strip()}"
+        # When the client hands us a structured question list rather than a
+        # narrative brief, the deliverable is ANSWERS — not a synthesized memo
+        # about a decomposition we invented. Extracted deterministically from
+        # the client's own text so the reviewer grades coverage against what was
+        # actually asked, not against our self-generated issue tree.
+        asked = prompts.question_checklist(case_prompt)
+        asked_section = (
+            _section(
+                "QUESTIONS THE CLIENT ASKED — every one requires an explicit answer",
+                asked + "\n\nThese are the client's own words. A fluent report that "
+                "answers none of them is a wrong answer.",
+            )
+            if asked
+            else ""
+        )
         # The learning loop: standing lessons from past engagements, injected as
         # guardrails so recurring errors are avoided this time.
         lessons = _standing_lessons()
@@ -487,12 +516,21 @@ async def _run_engagement(
             "issue_tree",
             "issue-tree-generator",
             case
+            + asked_section
             + _section("Intake brief", outputs["classify"])
             + _section("Framework selection", outputs["framing"])
             + knowledge_section
             + lessons
             + "\n\nBuild the MECE issue tree with owned, testable leaves.\n\n"
-            "If this is an acquisition / M&A / market-entry case, the tree MUST be "
+            + (
+                "The client asked explicit questions (listed above). The tree "
+                "MUST cover every one — a leaf that answers each. A tree that is "
+                "elegant but leaves the client's questions unanswered is a MECE "
+                "failure, because the client's questions ARE the problem space.\n\n"
+                if asked
+                else ""
+            )
+            + "If this is an acquisition / M&A / market-entry case, the tree MUST be "
             "complete on the standard commercial-due-diligence dimensions — omitting "
             "any of these is a MECE failure a partner would reject:\n"
             "1. Target asset value — what is being bought and what it's worth "
@@ -608,7 +646,10 @@ async def _run_engagement(
         )
         # Minimal reconcile context: case + issue tree + analyst outputs.
         reconcile_context = (
-            case + _section("Issue tree", outputs["issue_tree"]) + analysis_detail
+            case
+            + asked_section
+            + _section("Issue tree", outputs["issue_tree"])
+            + analysis_detail
         )
 
         canonical = await phase(
@@ -633,6 +674,7 @@ async def _run_engagement(
             # fail every engagement on sequencing grounds, not substance.
             governance_context = (
                 case
+                + asked_section
                 + _section("Issue tree", outputs["issue_tree"])
                 + _section(
                     "CANONICAL RECONCILIATION — single source of truth", canonical
@@ -669,7 +711,23 @@ async def _run_engagement(
                 "load-bearing question with no answer in the closure table, a "
                 "contradiction the reconciliation failed to resolve, a decision-"
                 "critical figure with no quantification, or a canonical-ledger row "
-                "whose confidence is unjustified. Verdict: approved / needs_rework.",
+                "whose confidence is unjustified."
+                + (
+                    " (6) COVERAGE OF THE CLIENT'S QUESTIONS — this outranks every "
+                    "other check. The client asked explicit questions (listed above "
+                    "under 'QUESTIONS THE CLIENT ASKED'). Walk that list and confirm "
+                    "each has an actual answer in the canonical reconciliation. Any "
+                    "unanswered question is a substantive defect — return "
+                    "needs_rework and name the specific Q-numbers that are missing. "
+                    "Judging coverage only by the issue tree is grading our own "
+                    "homework: the tree is something we generated, the questions are "
+                    "what the client actually wants. A well-structured memo that "
+                    "answers a question the client did not ask is a failed "
+                    "engagement, not an approved one."
+                    if asked
+                    else ""
+                )
+                + " Verdict: approved / needs_rework.",
                 checkpoint=False,
                 max_tokens=2000,
                 # Governance outcome rides this span's terminal event: the
@@ -715,6 +773,7 @@ async def _run_engagement(
         # (not the full prior-phase history) to keep input ≤ 3 500 tokens.
         final_context = (
             case
+            + asked_section
             + _section("Issue tree", outputs["issue_tree"])
             + _section("CANONICAL RECONCILIATION — single source of truth", canonical)
             + analysis_detail
@@ -770,7 +829,22 @@ async def _run_engagement(
             + "\n\nUse the CANONICAL RECONCILIATION as the single source of truth"
             " for every number and every assumption ID — never cite a figure from"
             " the analyst detail that the canonical ledger supersedes.\n"
-            "\nWrite it to MBB (McKinsey/Bain/BCG) partner standard:\n"
+            + (
+                "\nTHE CLIENT ASKED EXPLICIT QUESTIONS (listed above). They are the "
+                "deliverable. Answer EVERY ONE, in their order, under a dedicated "
+                "section — each answer labelled with its Q-number, direct and "
+                "self-contained. Where a question is arithmetic, SHOW THE "
+                "CALCULATION and state the result; do not gesture at it. Where a "
+                "question asks for a judgement (would you exit / would you raise "
+                "price / what would you do if it were your company), COMMIT to an "
+                "answer and give the reason — 'it depends' is not an answer. You may "
+                "still lead with an executive summary, but a memo that covers your "
+                "own framing while leaving the client's questions unanswered is a "
+                "failed deliverable, however well written.\n"
+                if asked
+                else ""
+            )
+            + "\nWrite it to MBB (McKinsey/Bain/BCG) partner standard:\n"
             f"- Start with an H1 title, then a meta line `**Prepared for:** the "
             f"board · **Date:** {_today()} · **Governance:**"
             f" reviewer={review_verdict} · "
@@ -781,7 +855,20 @@ async def _run_engagement(
             "- Then: `## Situation`, `## Approach`, `## Analysis` (one subsection per "
             "issue-tree branch), `## Recommendation` (with numbered, sequenced next "
             "steps and 'alternatives rejected, and why'), `## Risks & what would"
-            " change the answer`, and `## Appendix: assumptions log` (a markdown"
+            " change the answer`, "
+            + (
+                "`## Answers to your questions` — MANDATORY, non-negotiable, placed "
+                "immediately after `## Recommendation`. One `### Q<n>.` subsection "
+                "per client question, in the client's order, copied from the "
+                "'Client question closure' table of the canonical reconciliation. "
+                "Every question gets a direct answer; arithmetic questions show the "
+                "computation AND the result; judgement questions commit to a "
+                "position. This section is the deliverable — a report that omits it "
+                "has failed the engagement no matter how good the rest is. "
+                if asked
+                else ""
+            )
+            + "and `## Appendix: assumptions log` (a markdown"
             " table with "
             "columns ID | Confidence | Assumption | Breakeven).\n"
             "- Use markdown tables for every option comparison and every set of "
@@ -811,7 +898,15 @@ async def _run_engagement(
             "never state that an offer is below intrinsic value and recommend "
             "accepting it without pricing why.",
             checkpoint=False,
-            max_tokens=config.REPORT_MAX_TOKENS,
+            # A structured case must fit a full memo AND an answer per question.
+            # At the base budget the model spends it all on the memo and silently
+            # drops the answers — the failure this whole change exists to fix.
+            max_tokens=(
+                config.REPORT_MAX_TOKENS
+                + 220 * len(prompts.explicit_questions(case_prompt))
+                if asked
+                else config.REPORT_MAX_TOKENS
+            ),
         )
 
         db.set_engagement_status(engagement_id, "completed", report_md=report)

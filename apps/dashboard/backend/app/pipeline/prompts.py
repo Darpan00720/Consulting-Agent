@@ -200,3 +200,99 @@ def selected_framework_notes(frame_text: str, *, cap_chars: int = 8000) -> str:
         parts.append(f"### {name}\n\n{body}")
         used += len(body)
     return "\n\n".join(parts)
+
+
+# --- what the client actually asked -----------------------------------------
+
+# Below this many explicit questions, a prompt is a narrative brief that happens
+# to contain a question or two ("Should it add a cafe format?") — the normal
+# issue-tree pipeline handles it. At or above it, the client has handed us a
+# structured question list and expects each one answered; a synthesized memo
+# that covers none of them is a wrong answer no matter how well written.
+EXPLICIT_QUESTION_THRESHOLD = 5
+
+# A bare "Question 12" / "Q12." line, used as a delimiter between asks.
+_QUESTION_MARKER = re.compile(r"^\s*(?:question|q)\s*(\d+)\s*[.):\-]?\s*$", re.I)
+# Section headers ("Section 3 — Financial Analysis") end the preceding question.
+_SECTION_MARKER = re.compile(r"^\s*(?:section|part)\b", re.I)
+_INLINE_LABEL = re.compile(r"^(?:question|q)\s*\d+\s*[.):\-]?\s*", re.I)
+_SEPARATOR = re.compile(r"^[\s\u2014\u2013\-_=*#>·•]*$")
+
+
+def explicit_questions(case_prompt: str) -> list[str]:
+    """Questions the client asked, in order, verbatim.
+
+    Deterministic on purpose: this is the checklist the reviewer grades coverage
+    against, so it must come from the CLIENT'S text — never from anything the
+    pipeline generated. The reviewer used to judge coverage by the issue tree,
+    which the pipeline invents itself, so it could not notice that the client's
+    own questions went unanswered.
+
+    Two shapes are supported:
+
+    * **Marked** — a ``Question 38`` line followed by the ask. The whole block is
+      captured, because these are frequently multi-line and frequently do NOT end
+      in a question mark::
+
+          Question 38
+          Each store serves 600 customers/day.
+          Traffic falls 8%.
+          Estimate annual revenue impact.        <- imperative, no "?"
+
+      Taking only "?" lines would silently drop exactly the arithmetic asks.
+    * **Unmarked** — plain lines ending in "?".
+    """
+    lines = case_prompt.splitlines()
+    if (
+        sum(1 for ln in lines if _QUESTION_MARKER.match(ln))
+        >= EXPLICIT_QUESTION_THRESHOLD
+    ):
+        return _marked_questions(lines)
+    return _unmarked_questions(lines)
+
+
+def _marked_questions(lines: list[str]) -> list[str]:
+    """Each `Question N` marker opens a block that runs to the next marker or
+    section header. Keeps multi-line asks (and their numbers) intact."""
+    out: list[str] = []
+    buf: list[str] | None = None
+    for raw in lines:
+        if _QUESTION_MARKER.match(raw):
+            if buf:
+                out.append(" ".join(buf).strip())
+            buf = []
+            continue
+        if buf is None:
+            continue
+        if _SECTION_MARKER.match(raw):  # a section header closes the open block
+            if buf:
+                out.append(" ".join(buf).strip())
+            buf = None
+            continue
+        line = raw.strip()
+        if line and not _SEPARATOR.match(line):
+            buf.append(line)
+    if buf:
+        out.append(" ".join(buf).strip())
+    return [q for q in out if len(q) >= 12]
+
+
+def _unmarked_questions(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in lines:
+        line = raw.strip().lstrip("#-*\u2022> ").strip()
+        if not line.endswith("?"):
+            continue
+        line = _INLINE_LABEL.sub("", line).strip()
+        if len(line) >= 12 and line not in out:
+            out.append(line)
+    return out
+
+
+def question_checklist(case_prompt: str) -> str:
+    """The client's questions as a numbered checklist, or "" when the prompt is
+    a narrative brief rather than a structured question list."""
+    asked = explicit_questions(case_prompt)
+    if len(asked) < EXPLICIT_QUESTION_THRESHOLD:
+        return ""
+    return "\n".join(f"Q{i}. {q}" for i, q in enumerate(asked, 1))

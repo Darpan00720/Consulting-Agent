@@ -34,10 +34,19 @@ CREATE TABLE IF NOT EXISTS engagements (
     -- never persisted) — just a flag, so a restart can tell which paused runs
     -- are safe to resume on the server's own providers.
     used_byok INTEGER NOT NULL DEFAULT 0,
+    -- Salted hash of the source IP — never the IP itself. Enough to enforce a
+    -- per-source quota the caller cannot spoof (unlike client_id), useless for
+    -- identifying anyone. See config.IP_HASH_SALT.
+    ip_hash TEXT,
     created_at REAL NOT NULL,
     completed_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_engagements_client ON engagements(client_id, created_at);
+-- NOTE: the ip_hash index is created in _migrate(), never here. This script runs
+-- BEFORE the migration, and on an existing database CREATE TABLE IF NOT EXISTS
+-- is a no-op — so indexing a column added later fails outright ("no such column:
+-- ip_hash") and the process dies at startup. Any index on a migrated column
+-- belongs in _migrate.
 -- Reader feedback on a delivered report. This is the only channel through which
 -- a real user tells us the analysis was wrong, so it is stored verbatim and
 -- never summarised away. Multiple notes per engagement are allowed (someone may
@@ -114,6 +123,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE engagements ADD COLUMN used_byok INTEGER NOT NULL DEFAULT 0"
         )
+    if "ip_hash" not in existing:
+        conn.execute("ALTER TABLE engagements ADD COLUMN ip_hash TEXT")
+    # Unconditional: the column exists by now on BOTH paths (fresh DBs get it
+    # from CREATE TABLE, older ones from the ALTER above), and a fresh DB would
+    # otherwise never get the index at all — the migration branch wouldn't run.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_engagements_ip"
+        " ON engagements(ip_hash, created_at)"
+    )
 
 
 def reset_for_tests() -> None:
@@ -127,18 +145,49 @@ def reset_for_tests() -> None:
 
 
 def create_engagement(
-    client_id: str, case_prompt: str, *, used_byok: bool = False
+    client_id: str,
+    case_prompt: str,
+    *,
+    used_byok: bool = False,
+    ip_hash: str | None = None,
 ) -> str:
     engagement_id = f"eng_{uuid.uuid4().hex}"
     with _lock:
         conn = connect()
         conn.execute(
             "INSERT INTO engagements (id, client_id, case_prompt, status, used_byok,"
-            " created_at) VALUES (?,?,?, 'queued', ?, ?)",
-            (engagement_id, client_id, case_prompt, 1 if used_byok else 0, time.time()),
+            " ip_hash, created_at) VALUES (?,?,?, 'queued', ?, ?, ?)",
+            (
+                engagement_id,
+                client_id,
+                case_prompt,
+                1 if used_byok else 0,
+                ip_hash,
+                time.time(),
+            ),
         )
         conn.commit()
     return engagement_id
+
+
+def engagements_today_from_ip(ip_hash: str) -> int:
+    """Free-tier runs from one source in 24h.
+
+    Counts only free-tier runs: a BYOK visitor spends their own quota, so
+    rate-limiting them protects nothing and would punish the users we most want.
+    """
+    day_start = time.time() - 86400
+    with _lock:
+        row = (
+            connect()
+            .execute(
+                "SELECT COUNT(*) AS n FROM engagements"
+                " WHERE ip_hash = ? AND used_byok = 0 AND created_at > ?",
+                (ip_hash, day_start),
+            )
+            .fetchone()
+        )
+    return int(row["n"])
 
 
 def interrupted_engagements() -> list[dict[str, Any]]:
