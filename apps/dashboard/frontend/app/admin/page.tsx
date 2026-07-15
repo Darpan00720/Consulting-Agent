@@ -21,6 +21,31 @@ import {
   type Lesson,
 } from "@/lib/api";
 
+/** Which engagements a stat card drills into. A number on a dashboard should be
+ *  a door: clicking "Failed" must show you the failures, not just count them. */
+type FilterKey =
+  | "all"
+  | "completed"
+  | "failed"
+  | "in_flight"
+  | "shipped_final"
+  | "interim_only"
+  | "free"
+  | "byok"
+  | "feedback";
+
+const FILTERS: Record<FilterKey, (r: AdminEngagement) => boolean> = {
+  all: () => true,
+  completed: (r) => r.status === "completed",
+  failed: (r) => r.status === "failed",
+  in_flight: (r) => ["running", "queued", "paused"].includes(r.status),
+  shipped_final: (r) => r.review_ready === 1,
+  interim_only: (r) => r.status === "completed" && r.review_ready === 0,
+  free: (r) => !r.used_byok,
+  byok: (r) => !!r.used_byok,
+  feedback: (r) => r.feedback_count > 0,
+};
+
 export default function AdminPage() {
   const [token, setToken] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -30,6 +55,7 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterKey>("all");
 
   const load = useCallback(
     async (t: string) => {
@@ -89,6 +115,7 @@ export default function AdminPage() {
 
   const failing = rows.filter((r) => r.status === "failed");
   const withFeedback = rows.filter((r) => r.feedback_count > 0);
+  const visible = rows.filter(FILTERS[filter]);
 
   return (
     <div className="admin">
@@ -101,34 +128,54 @@ export default function AdminPage() {
 
       {overview && (
         <div className="admin-stats">
-          <Stat label="Engagements" value={overview.total} />
+          <Stat label="Engagements" value={overview.total} filter="all" active={filter} onPick={setFilter} />
           <Stat label="Users" value={overview.users} hint="distinct browsers" />
           <Stat
             label="Completed"
             value={overview.completed}
             tone={overview.completed > 0 ? "ok" : undefined}
+            filter="completed"
+            active={filter}
+            onPick={setFilter}
           />
           <Stat
             label="Failed"
             value={overview.failed}
             tone={overview.failed > 0 ? "bad" : undefined}
+            filter="failed"
+            active={filter}
+            onPick={setFilter}
           />
-          <Stat label="In flight" value={overview.in_flight} />
+          <Stat label="In flight" value={overview.in_flight} filter="in_flight" active={filter} onPick={setFilter} />
           <Stat
             label="Shipped final"
             value={overview.shipped_final}
             hint="cleared both gates"
+            filter="shipped_final"
+            active={filter}
+            onPick={setFilter}
           />
           <Stat
             label="Interim only"
             value={overview.interim_only}
             hint="governance refused"
             tone={overview.interim_only > 0 ? "warn" : undefined}
+            filter="interim_only"
+            active={filter}
+            onPick={setFilter}
           />
-          <Stat label="Free tier" value={overview.free_runs} />
-          <Stat label="Own API key" value={overview.byok_runs} />
-          <Stat label="Feedback" value={overview.feedback_count} />
-          <Stat label="Lessons learned" value={overview.lessons_learned} />
+          <Stat label="Free tier" value={overview.free_runs} filter="free" active={filter} onPick={setFilter} />
+          <Stat label="Own API key" value={overview.byok_runs} filter="byok" active={filter} onPick={setFilter} />
+          <Stat label="Feedback" value={overview.feedback_count} filter="feedback" active={filter} onPick={setFilter} />
+          <Stat
+            label="Lessons learned"
+            value={overview.lessons_learned}
+            onJump={() =>
+              document
+                .getElementById("admin-lessons")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" })
+            }
+          />
         </div>
       )}
 
@@ -183,8 +230,24 @@ export default function AdminPage() {
         </section>
       )}
 
-      <section className="admin-section">
-        <h2>All engagements</h2>
+      <section className="admin-section" id="admin-engagements">
+        <div className="admin-section-head">
+          <h2>
+            {filter === "all" ? "All engagements" : "Engagements"}{" "}
+            <span className="muted admin-count">
+              ({visible.length}
+              {filter !== "all" ? ` of ${rows.length}` : ""})
+            </span>
+          </h2>
+          {filter !== "all" && (
+            <button className="ghost sm" onClick={() => setFilter("all")}>
+              Clear filter: {FILTER_LABELS[filter]} ✕
+            </button>
+          )}
+        </div>
+        {visible.length === 0 && (
+          <p className="muted">No engagements match this filter.</p>
+        )}
         <table className="admin-table">
           <thead>
             <tr>
@@ -198,7 +261,7 @@ export default function AdminPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {visible.map((r) => (
               <>
                 <tr
                   key={r.id}
@@ -253,7 +316,7 @@ export default function AdminPage() {
         </table>
       </section>
 
-      <section className="admin-section">
+      <section className="admin-section" id="admin-lessons">
         <h2>Lessons learned ({lessons.length})</h2>
         <p className="muted">
           Distilled automatically after every engagement and injected into all
@@ -269,23 +332,73 @@ export default function AdminPage() {
   );
 }
 
+const FILTER_LABELS: Record<FilterKey, string> = {
+  all: "All",
+  completed: "Completed",
+  failed: "Failed",
+  in_flight: "In flight",
+  shipped_final: "Shipped final",
+  interim_only: "Interim only",
+  free: "Free tier",
+  byok: "Own API key",
+  feedback: "With feedback",
+};
+
+/** A stat card. When given `filter` or `onJump` it becomes a real <button> —
+ *  keyboard-reachable and announced as pressed — so the number is a door, not
+ *  decoration. "Users" has nothing to drill into, so it stays inert. */
 function Stat({
   label,
   value,
   hint,
   tone,
+  filter,
+  active,
+  onPick,
+  onJump,
 }: {
   label: string;
   value: number;
   hint?: string;
   tone?: "ok" | "bad" | "warn";
+  filter?: FilterKey;
+  active?: FilterKey;
+  onPick?: (f: FilterKey) => void;
+  onJump?: () => void;
 }) {
-  return (
-    <div className={`admin-stat${tone ? ` ${tone}` : ""}`}>
+  const isActive = !!filter && active === filter;
+  const clickable = !!filter || !!onJump;
+  const cls = `admin-stat${tone ? ` ${tone}` : ""}${clickable ? " clickable" : ""}${
+    isActive ? " active" : ""
+  }`;
+
+  const body = (
+    <>
       <span className="admin-stat-v">{value}</span>
       <span className="admin-stat-l">{label}</span>
       {hint && <span className="admin-stat-h">{hint}</span>}
-    </div>
+    </>
+  );
+
+  if (!clickable) return <div className={cls}>{body}</div>;
+
+  return (
+    <button
+      type="button"
+      className={cls}
+      aria-pressed={filter ? isActive : undefined}
+      onClick={() => {
+        if (onJump) return onJump();
+        if (!filter || !onPick) return;
+        // Clicking the active filter clears it — a toggle, not a trap.
+        onPick(isActive ? "all" : filter);
+        document
+          .getElementById("admin-engagements")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }}
+    >
+      {body}
+    </button>
   );
 }
 
