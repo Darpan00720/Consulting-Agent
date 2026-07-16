@@ -30,6 +30,34 @@ CASE = (
 CID_A = {"X-Client-Id": "browser-aaaa-1111"}
 CID_B = {"X-Client-Id": "browser-bbbb-2222"}
 
+# A minimal VALID quant ledger (ADR-009). The quant gate fails closed on a
+# missing block, so every fake engagement-manager output must carry one or the
+# engagement degrades to an interim memo and burns the deterministic fix budget.
+QUANT = (
+    "\n```quant\n"
+    "[\n"
+    ' {"id":"F1","kind":"fact","label":"Revenue","value":800,'
+    '"unit":"USD_M","basis":"annual","source":"case prompt"},\n'
+    ' {"id":"A1","kind":"assumption","label":"Margin uplift","value":0.01,'
+    '"unit":"RATIO","basis":"annual","source":"benchmark","low":0.005,"high":0.02},\n'
+    ' {"id":"D1","kind":"derived","label":"EBITDA uplift","value":8,'
+    '"unit":"USD_M","basis":"annual","formula":"F1 * A1"}\n'
+    "]\n"
+    "```\n"
+)
+
+
+def fake_output(agent: str) -> str:
+    """Default fake agent output: parseable verdicts for governance agents and
+    a valid quant ledger for the engagement manager."""
+    if agent == "reviewer":
+        return "Verdict: approved"
+    if agent == "challenger":
+        return "Verdict: stands"
+    if agent == "engagement-manager":
+        return f"output-of-{agent}" + QUANT
+    return f"output-of-{agent}"
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
@@ -136,7 +164,7 @@ def test_concurrency_cap_limits_simultaneous_engagements(tmp_path, monkeypatch):
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     async def drive():
         ids = [db.create_engagement("browser-x", CASE) for _ in range(5)]
@@ -175,7 +203,7 @@ def test_telemetry_records_spans_for_every_phase_and_analyst(tmp_path, monkeypat
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -218,7 +246,7 @@ def test_telemetry_feeds_the_cores_quality_analytics(tmp_path, monkeypatch):
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands_with_caveats"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -256,7 +284,7 @@ def test_telemetry_failure_never_breaks_an_engagement(tmp_path, monkeypatch):
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -274,7 +302,7 @@ def test_engine_direct_with_fake_agent(tmp_path, monkeypatch):
     async def fake_call(agent, system, user, **kw):
         seen.append(agent)
         assert len(system) > 100  # real prompt loaded
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     engagement_id = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(engagement_id, CASE, call=fake_call))
@@ -309,7 +337,7 @@ def test_rework_loop_reconciles_then_completes(tmp_path, monkeypatch):
             )
         if agent == "challenger":
             return "Verdict: stands_with_caveats"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     engagement_id = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(engagement_id, CASE, call=fake_call))
@@ -345,7 +373,7 @@ def test_rework_gives_up_and_writes_interim(tmp_path, monkeypatch):
             return "Verdict: needs_rework\n[financial-analyst]: still contradictory"
         if agent == "challenger":
             return "Verdict: needs_rework"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     engagement_id = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(engagement_id, CASE, call=fake_call))
@@ -380,7 +408,7 @@ def test_reflection_learns_lessons_on_blocked_run(tmp_path, monkeypatch):
                 "LESSON: Assign globally-unique assumption IDs across all analysts.\n"
                 "NONE"
             )
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -425,7 +453,7 @@ def test_reflection_learns_on_every_engagement(tmp_path, monkeypatch):
         if agent == "reflector":
             reflector_prompts.append(user)
             return "LESSON: State the breakeven for every load-bearing assumption."
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -508,7 +536,7 @@ def test_rate_limit_pauses_then_resumes_from_checkpoint(tmp_path, monkeypatch):
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -823,7 +851,7 @@ def test_admin_reports_the_failing_step(tmp_path, monkeypatch):
     async def die_at_issue_tree(agent, system, user, **kw):
         if agent == "issue-tree-generator":
             raise RuntimeError("provider exploded")
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=die_at_issue_tree))
@@ -941,7 +969,7 @@ def test_structured_case_puts_the_questions_in_front_of_every_gate(
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", STRUCTURED_CASE)
     asyncio.run(run_engagement(eid, STRUCTURED_CASE, call=fake_call))
@@ -977,7 +1005,7 @@ def test_narrative_brief_leaves_the_gates_unchanged(tmp_path, monkeypatch):
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     asyncio.run(run_engagement(eid, CASE, call=fake_call))
@@ -1102,7 +1130,7 @@ def test_eval_grades_report_and_learns_lessons(tmp_path, monkeypatch):
                 "LESSON: Always evaluate strategic alternatives, not only"
                 " the proposed move."
             )
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     case_id = db.create_case("browser-x", "M&A case", CASE, RUBRIC)
     engagement_id = db.create_engagement("browser-x", CASE)
@@ -1188,7 +1216,7 @@ def test_report_writer_gets_the_answers_section_in_its_structure_spec(
             return "Verdict: approved"
         if agent == "challenger":
             return "Verdict: stands"
-        return f"output-of-{agent}"
+        return fake_output(agent)
 
     eid = db.create_engagement("browser-x", STRUCTURED_CASE)
     asyncio.run(run_engagement(eid, STRUCTURED_CASE, call=fake_call))

@@ -24,7 +24,7 @@ from typing import Any
 from app import config, db
 from app import telemetry_bridge as telemetry
 from app.events import bus
-from app.pipeline import prompts
+from app.pipeline import prompts, quantcheck
 from app.pipeline.claude import call_agent, friendly_error
 from app.pipeline.providers import AllProvidersRateLimitedError
 
@@ -211,6 +211,43 @@ never silently drop it.
 ## Corrections applied
 A bullet list of every collision or contradiction you resolved (ID reused,
 number in dispute, citation to a stale value) and how you resolved it.
+
+## Quant ledger
+The LAST thing in your output: a fenced code block opened with ```quant
+containing ONE JSON array — the machine-verified factbase (ADR-009). A
+deterministic verifier re-evaluates every formula in exact decimal arithmetic;
+any mismatch, missing field, or missing block BLOCKS the engagement, so this
+section is not optional and not prose. Every number cited anywhere above
+(reconciled key figures, options comparison, question closures) must appear as
+an entry here.
+
+Entry schema (one JSON object per number):
+  {"id":"D4","kind":"derived","label":"Delivery commission drain",
+   "value":19.44,"unit":"EUR_M","basis":"annual","formula":"F1 * A8 * A9"}
+
+Rules the verifier enforces:
+- kind is "fact" (client-stated; "source" quotes the case text), "assumption"
+  ("source" names where the number would come from — POS, CRM, financials,
+  contract, benchmark — plus a plausibility band "low"/"high" containing
+  "value"), or "derived" ("formula" over other ledger ids using only
+  + - * / ** and parentheses; a derived entry with no formula is invalid).
+- Rates used in any formula are stored as RATIO (0.05 = 5%), never PCT.
+- State values at FULL precision of the computation — never round inside the
+  ledger (the report rounds for prose). A value that does not equal its own
+  formula is a defect.
+- "basis" is the time scope: "annual", "cumulative_3yr", "per_store", etc.
+  Never add terms with different units or mixed scopes in one formula.
+- For any profitability / cost-change case, include a BRIDGE: the
+  period-over-period EBITDA (or cost) change decomposed into named derived
+  components — volume/revenue scaling (base-period cost ratio times the
+  revenue change), price/inflation, mix, one-offs — and a total entry with
+  "bridge": true whose formula is the pure +/- sum of those component ids.
+  The unexplained residual is itself a derived entry (computed, never
+  asserted).
+- Where a derived figure has an independent factual counterpart (e.g. a
+  market share implied by SOM vs the company's actual revenue over the same
+  market size), set "anchor": "<id>" on the derived entry so the verifier
+  cross-checks them — this is how self-contradictions are caught.
 
 Rules:
 - Do NOT change any conclusion or recommendation — only harmonize IDs, numbers,
@@ -468,7 +505,13 @@ async def _run_engagement(
             + "\n\nIdentify the load-bearing information gaps and seed the assumption "
             "ledger. This is a non-interactive run: for every gap, ASSUME with a "
             "labeled `[ASSUMPTION AL-xx: ...]` entry (statement, working value, "
-            "confidence, breakeven) rather than escalating to a human.",
+            "confidence, breakeven) rather than escalating to a human. For every "
+            "assumption also state (1) its SOURCE — where the number would come "
+            "from in a real engagement: POS, CRM, financial statements, supplier "
+            "contract, or a named industry benchmark — and (2) a plausibility "
+            "band low–high the working value sits inside. An assumption whose "
+            "band you cannot defend against a benchmark is an OPEN gap; say so "
+            "explicitly instead of adopting it.",
             images=images,
             max_tokens=2000,
         )
@@ -589,6 +632,18 @@ async def _run_engagement(
             # likeliest place to exhaust a rate limit — per-analyst spans are
             # what let an operator see WHICH one is slow or failing.
             with telemetry.span(engagement_id, agent, "analysis"):
+                bridge_rule = (
+                    "\n\nIf the case involves a profit or cost change over time, "
+                    "build a PERIOD-OVER-PERIOD BRIDGE: decompose the change into "
+                    "volume/revenue scaling (costs grow with revenue at the "
+                    "base-period cost ratio — never treat natural variable-cost "
+                    "growth as unexplained), price/inflation, mix, and one-offs. "
+                    "The residual is what remains AFTER the scaling term — "
+                    "computed, never guessed. Apply each YoY rate over the full "
+                    "period in question, not a single year."
+                    if agent == "financial-analyst"
+                    else ""
+                )
                 result = await call(
                     agent,
                     prompts.agent_system_prompt(agent),
@@ -597,7 +652,8 @@ async def _run_engagement(
                     "Produce concise, quantified analysis. Label every assumption "
                     "with a sequentially numbered ID: `[ASSUMPTION AL-1: ...]`, "
                     "`[ASSUMPTION AL-2: ...]`, and so on — never output a literal "
-                    "placeholder like 'AL-xx'. Keep total response under 500 words.",
+                    "placeholder like 'AL-xx'. Keep total response under 500 words."
+                    + bridge_rule,
                     api_key=api_key,
                     model=model,
                     images=images,
@@ -664,6 +720,77 @@ async def _run_engagement(
             max_tokens=3500,
         )
 
+        # --- Quant Gate (ADR-009): deterministic math verification -----------
+        # The verifier is code, not an LLM: it re-evaluates every ledger
+        # formula in exact decimal arithmetic. Failures produce an exact,
+        # machine-generated defect list that goes straight back to the
+        # Engagement Manager — cheaper and stricter than an LLM review, and it
+        # runs BEFORE the reviewer so LLM review budget is spent on judgment,
+        # never on arithmetic. Fix budget is shared across the whole run so a
+        # reviewer-driven rework that breaks the ledger can still be repaired.
+        quant_fixes_left = config.MAX_REWORK + 1
+
+        async def quant_verified(
+            canonical: str,
+        ) -> tuple[str, quantcheck.QuantReport]:
+            nonlocal quant_fixes_left
+            verdict = quantcheck.verify_ledger(canonical)
+            while not verdict.passed and quant_fixes_left > 0:
+                quant_fixes_left -= 1
+                await _emit(
+                    engagement_id,
+                    "quant_gate",
+                    {
+                        "passed": False,
+                        "fixing": True,
+                        "defects": [d.message for d in verdict.defects],
+                    },
+                )
+                canonical = await phase(
+                    "reconcile",
+                    "engagement-manager",
+                    reconcile_context
+                    + _section("Your previous canonical reconciliation", canonical)
+                    + _section(
+                        "QUANT GATE DEFECTS — deterministic verifier output. "
+                        "These are exact; every one must be fixed",
+                        quantcheck.format_defects(verdict),
+                    )
+                    + "\n\nRe-issue the FULL canonical reconciliation with a "
+                    "corrected ```quant ledger. Fix exactly what the defects "
+                    "name — correct the value or the formula, never adjust an "
+                    "unrelated number to force agreement. Conclusions and "
+                    "recommendations stay unchanged unless a corrected number "
+                    "genuinely invalidates them, in which case say so in "
+                    "Corrections applied.",
+                    system_override=ENGAGEMENT_MANAGER_SYSTEM,
+                    checkpoint=False,
+                    max_tokens=6000,
+                )
+                verdict = quantcheck.verify_ledger(canonical)
+            await _emit(
+                engagement_id,
+                "quant_gate",
+                {
+                    "passed": verdict.passed,
+                    "fixing": False,
+                    "defects": [d.message for d in verdict.defects],
+                },
+            )
+            # A (near-zero-duration) span, not a bare emit: FINISHED events
+            # must carry durations, and validation_status rides the terminal
+            # event the same way the reviewer's verdict does. reconcile maps
+            # to ORCHESTRATION, so quality analytics for REVIEW stay clean.
+            with telemetry.span(engagement_id, "quant-gate", "reconcile") as handle:
+                telemetry.attach(
+                    handle,
+                    validation_status="passed" if verdict.passed else "blocked",
+                    quant_defects=len(verdict.defects),
+                )
+            return canonical, verdict
+
+        canonical, quant = await quant_verified(canonical)
+
         review = ""
         review_verdict = "needs_rework"
         for attempt in range(config.MAX_REWORK + 1):
@@ -678,6 +805,23 @@ async def _run_engagement(
                 + _section("Issue tree", outputs["issue_tree"])
                 + _section(
                     "CANONICAL RECONCILIATION — single source of truth", canonical
+                )
+                + _section(
+                    "Deterministic quant gate (ADR-009)",
+                    (
+                        "PASSED — a deterministic verifier has re-evaluated every "
+                        "formula in the quant ledger in exact decimal arithmetic; "
+                        "units, bounds, anchors, and bridge closure all check out. "
+                        "Do NOT spend review effort re-doing arithmetic, and never "
+                        "fail a figure because your own mental math differs — the "
+                        "machine's evaluation is authoritative."
+                        if quant.passed
+                        else "FAILED — the quant ledger still has machine-verified "
+                        "defects after the fix budget was exhausted:\n"
+                        + quantcheck.format_defects(quant)
+                        + "\nThe engagement cannot be review-ready; still review "
+                        "the substance so the rework is complete."
+                    ),
                 )
                 + _section(
                     "Analyst working notes — context only, NOT reviewable",
@@ -711,9 +855,13 @@ async def _run_engagement(
                 "load-bearing question with no answer in the closure table, a "
                 "contradiction the reconciliation failed to resolve, a decision-"
                 "critical figure with no quantification, or a canonical-ledger row "
-                "whose confidence is unjustified."
+                "whose confidence is unjustified; (6) arithmetic is MACHINE-"
+                "VERIFIED upstream (see the quant-gate section) — your job is "
+                "judgment: MECE coverage, causality (is the named driver a cause "
+                "or a correlate — what alternative explanation would produce the "
+                "same numbers?), evidence quality, and calibration."
                 + (
-                    " (6) COVERAGE OF THE CLIENT'S QUESTIONS — this outranks every "
+                    " (7) COVERAGE OF THE CLIENT'S QUESTIONS — this outranks every "
                     "other check. The client asked explicit questions (listed above "
                     "under 'QUESTIONS THE CLIENT ASKED'). Walk that list and confirm "
                     "each has an actual answer in the canonical reconciliation. Any "
@@ -761,11 +909,16 @@ async def _run_engagement(
                 + _section("Your previous canonical reconciliation", canonical)
                 + _section("Reviewer's required fixes — resolve every one", review)
                 + "\n\nProduce a corrected canonical reconciliation that fixes every "
-                "issue the reviewer raised.",
+                "issue the reviewer raised. Keep the ```quant ledger valid: every "
+                "figure you change must change in the ledger too, with its formula.",
                 system_override=ENGAGEMENT_MANAGER_SYSTEM,
                 checkpoint=False,
                 max_tokens=6000,
             )
+            # A reviewer-driven rework may have altered figures — the quant
+            # gate re-verifies (and deterministically repairs, within budget)
+            # so a rework can never trade a judgment fix for broken math.
+            canonical, quant = await quant_verified(canonical)
             await _emit(engagement_id, "rework_completed", {"attempt": attempt + 1})
 
         outputs["analysis"] = render_analysis()
@@ -790,7 +943,24 @@ async def _run_engagement(
             "approve does not apply here. Attack the load-bearing assumptions and "
             "build the strongest counter-case. Judge ONLY the substance of the "
             "recommendation — process or bookkeeping complaints belong to the "
-            "reviewer, not you. End with exactly one line: `VERDICT: stands` or "
+            "reviewer, not you. The arithmetic itself is machine-verified "
+            "(quant gate), so attack the MODEL, not the sums — run this "
+            "KILLER-QUESTION checklist and answer each in one or two lines:\n"
+            "(a) BASIS — is each headline figure run-rate or cumulative, and "
+            "does the recommendation still clear its hurdle on the other "
+            "reading?\n"
+            "(b) BREAKEVEN — which single assumption, moved to the edge of its "
+            "stated low–high band, flips the recommendation? Say which and at "
+            "what value.\n"
+            "(c) MEAN REVERSION — if the largest cost or growth driver reverts "
+            "to its historical norm next year, does the recommendation survive?\n"
+            "(d) CAUSALITY — for each named cause, state the strongest "
+            "alternative explanation that produces the same numbers, and "
+            "whether the evidence distinguishes them.\n"
+            "(e) THE CEO TEST — name the two most obvious simpler moves (raise "
+            "price, close the worst stores, cut HQ, exit the channel) and why "
+            "the recommendation beats each, in euros.\n"
+            "End with exactly one line: `VERDICT: stands` or "
             "`VERDICT: stands_with_caveats` or `VERDICT: needs_rework`.",
             checkpoint=False,
             max_tokens=2000,
@@ -806,11 +976,21 @@ async def _run_engagement(
         challenge_verdict = _challenger_verdict(challenge)
         await _emit(engagement_id, "challenge_verdict", {"verdict": challenge_verdict})
 
-        review_ready = review_verdict == "approved" and challenge_verdict in (
-            "stands",
-            "stands_with_caveats",
+        # The quant gate is a full governance gate: verified math is as
+        # mandatory as reviewer approval — a report whose numbers the machine
+        # could not verify is never presented as final.
+        review_ready = (
+            quant.passed
+            and review_verdict == "approved"
+            and challenge_verdict in ("stands", "stands_with_caveats")
         )
 
+        report_budget = (
+            config.REPORT_MAX_TOKENS
+            + 220 * len(prompts.explicit_questions(case_prompt))
+            if asked
+            else config.REPORT_MAX_TOKENS
+        )
         report = await phase(
             "reporting",
             "report-writer",
@@ -896,18 +1076,73 @@ async def _run_engagement(
             "recommendation is to accept an offer, the offer must be shown ≥ the "
             "independent value of the alternative (or the gap explicitly priced); "
             "never state that an offer is below intrinsic value and recommend "
-            "accepting it without pricing why.",
+            "accepting it without pricing why.\n"
+            "- QUANT DISCIPLINE (machine-enforced): every figure you write must "
+            "be a quant-ledger value or a number stated in the client's case "
+            "prompt. You may round a ledger value for prose, but NEVER re-derive, "
+            "combine, or invent a number — a figure you want that is not in the "
+            "ledger does not go in the report. A deterministic tie-out scans the "
+            "finished report and flags every orphan number.",
             checkpoint=False,
             # A structured case must fit a full memo AND an answer per question.
             # At the base budget the model spends it all on the memo and silently
             # drops the answers — the failure this whole change exists to fix.
-            max_tokens=(
-                config.REPORT_MAX_TOKENS
-                + 220 * len(prompts.explicit_questions(case_prompt))
-                if asked
-                else config.REPORT_MAX_TOKENS
-            ),
+            max_tokens=report_budget,
         )
+
+        # --- Report tie-out (ADR-009 §2.3): no orphan numbers -----------------
+        # Only meaningful when the ledger itself verified (an interim memo for
+        # a failed gate is already flagged not review-ready). One bounded
+        # rework with the exact orphan list; still failing → fail closed.
+        if review_ready:
+            tie = quantcheck.tie_out(report, quant.entries, case_prompt)
+            if not tie.passed:
+                await _emit(
+                    engagement_id,
+                    "quant_tie_out",
+                    {
+                        "passed": False,
+                        "fixing": True,
+                        "defects": [d.message for d in tie.defects],
+                    },
+                )
+                report = await phase(
+                    "reporting",
+                    "report-writer",
+                    final_context
+                    + _section("Your previous report", report)
+                    + _section(
+                        "ORPHAN NUMBERS — deterministic tie-out output. Every "
+                        "one must be resolved",
+                        quantcheck.format_defects(tie),
+                    )
+                    + "\n\nRe-issue the FULL report. Replace every orphan number "
+                    "with the correct quant-ledger value (rounded for prose is "
+                    "fine) or remove the claim — never invent a bridging figure. "
+                    "Change nothing else.",
+                    checkpoint=False,
+                    max_tokens=report_budget,
+                )
+                tie = quantcheck.tie_out(report, quant.entries, case_prompt)
+            if not tie.passed:
+                review_ready = False
+                report = (
+                    "> **⚠ QUANT GATE — NOT REVIEW-READY.** The following "
+                    "figures in this report could not be verified against the "
+                    "engagement's quant ledger and must not be relied on:\n>\n"
+                    + "\n".join(f"> - {d.message}" for d in tie.defects)
+                    + "\n\n"
+                    + report
+                )
+            await _emit(
+                engagement_id,
+                "quant_tie_out",
+                {
+                    "passed": tie.passed,
+                    "fixing": False,
+                    "defects": [d.message for d in tie.defects],
+                },
+            )
 
         db.set_engagement_status(engagement_id, "completed", report_md=report)
         db.set_governance(
