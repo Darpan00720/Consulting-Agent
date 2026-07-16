@@ -1,5 +1,10 @@
 # StratAgent Dashboard
 
+**Live at [stratagent.up.railway.app](https://stratagent.up.railway.app)** —
+that's how to use StratAgent. Everything in this file is internal/operator
+documentation for the app itself (self-hosting a dev copy, configuration,
+API reference), not a second way for visitors to run it.
+
 A web app for running StratAgent consulting engagements from the browser.
 **No accounts, no signup**: paste a business problem (and paste in charts or
 screenshots if you have them), watch the engagement run live (classify → scope →
