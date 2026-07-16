@@ -308,8 +308,42 @@ export default function EngagementPage() {
         }
       };
       source.onerror = () => {
-        // EventSource auto-reconnects; nothing to do unless closed.
+        // EventSource auto-reconnects on a transient drop. But a proxy
+        // (Railway, nginx) can permanently cut a long-lived SSE stream right as
+        // the final large `engagement_completed` event is delivered — leaving
+        // the phases all "done" but the report never set. When the connection
+        // is fully CLOSED and we have no report yet, poll the engagement
+        // directly: the report is safely in the DB even if the stream missed it.
+        if (source.readyState === EventSource.CLOSED) {
+          void reconcileFromServer();
+        }
       };
+    }
+
+    // Fallback path when the live stream ends without delivering the terminal
+    // event. Fetches the authoritative record and finishes the UI from it.
+    async function reconcileFromServer() {
+      try {
+        const e = await api.getEngagement(id);
+        if (e.status === "completed" && e.report_md) {
+          setReport(e.report_md);
+          setPhaseStates(Object.fromEntries(ALL_PHASES.map((p) => [p, "done"])));
+          setGov((g) => ({
+            ...g,
+            review: e.review_verdict ?? g.review,
+            challenge: e.challenge_verdict ?? g.challenge,
+            reviewReady:
+              e.review_ready === null ? undefined : e.review_ready === 1,
+          }));
+          sourceRef.current?.close();
+        } else if (e.status === "failed") {
+          setError(e.error ?? "Engagement failed");
+          sourceRef.current?.close();
+        }
+        // still running → let EventSource keep trying; do nothing.
+      } catch {
+        // transient; the reconnecting EventSource will try again.
+      }
     }
 
     return () => sourceRef.current?.close();

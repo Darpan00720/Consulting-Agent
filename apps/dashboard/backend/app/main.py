@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import config, db, retention
+from app import config, db, persistence_check, retention
 from app.pipeline.engine import recover_interrupted
 from app.routers import admin, engagements
 
@@ -25,6 +25,9 @@ from app.routers import admin, engagements
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.connect()
+    # Loudly flag the worst silent failure this product has: a DB on ephemeral
+    # storage that vanishes on the next redeploy (a real production incident).
+    persistence_check.check_persistence()
     # Adopt runs a previous process left paused/running, so a redeploy doesn't
     # strand them on a countdown that will never fire.
     await recover_interrupted()
@@ -73,4 +76,7 @@ def health() -> dict[str, object]:
         # So the privacy note on the landing page states the true window rather
         # than a hardcoded number that could drift from the actual purge.
         "retention_days": config.RETENTION_DAYS,
+        # True/False/None — an operator (or a monitor) can see at a glance
+        # whether the database is on durable storage. None = couldn't determine.
+        "persistent_storage": persistence_check.persistence_ok,
     }

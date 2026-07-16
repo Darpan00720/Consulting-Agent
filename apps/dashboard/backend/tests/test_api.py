@@ -1479,3 +1479,24 @@ def test_health_reports_the_real_retention_window(client, monkeypatch):
     monkeypatch.setattr(config, "RETENTION_DAYS", 5.0)
     body = client.get("/api/health").json()
     assert body["retention_days"] == 5.0
+
+
+def test_persistence_check_detects_ephemeral_storage(tmp_path, monkeypatch):
+    """The worst silent failure this product has is a DB on ephemeral storage
+    that vanishes on redeploy. The startup check must catch it.
+
+    A tmp_path under the test runner's root filesystem shares / 's device, so it
+    reads as NON-persistent — exactly the condition we must flag loudly.
+    """
+    from app import persistence_check
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "eph.db")
+    ok, detail = persistence_check.check_persistence()
+    # tmp_path is on the same device as / in CI, so this must report NOT durable
+    assert ok is False, f"expected ephemeral, got {ok}: {detail}"
+    assert "LOST on redeploy" in detail
+
+
+def test_health_reports_persistence_state(client):
+    body = client.get("/api/health").json()
+    assert "persistent_storage" in body  # True / False / None, surfaced to ops
