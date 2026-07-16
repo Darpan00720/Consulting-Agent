@@ -1,4 +1,16 @@
 {
+  "_comment": [
+    "BACKEND service config. Railway resolves this file relative to a service's",
+    "Root Directory, so this one applies to the service whose root is '/' — the",
+    "backend, which needs the repo root as build context (its Dockerfile COPYs",
+    "plugins/ and knowledge-vault/).",
+    "",
+    "The FRONTEND has its own apps/dashboard/frontend/railway.json. That is not",
+    "duplication: without it, Railway falls back to THIS file and builds the",
+    "backend's Dockerfile for the frontend service, which fails on",
+    "'apps/dashboard/backend/docker-entrypoint.sh: not found'. Each service with",
+    "a distinct root needs its own config."
+  ],
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
