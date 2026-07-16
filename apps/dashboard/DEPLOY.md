@@ -51,6 +51,28 @@ spending *quota*, not money. The ceiling is therefore requests/day, not budget:
 `DAILY_IP_QUOTA=15` means one network can take ~15 of those. If you outgrow it,
 add Gemini projects (free, linear) before you add billing.
 
+## 2.5 Live instance
+
+The operator's own deployment (Railway project `nurturing-cooperation`,
+workspace `darpan00720's Projects`):
+
+| Service | Railway service name | URL |
+|---|---|---|
+| Backend  | `Consulting-Agent`    | https://consulting-agent-production-7eb7.up.railway.app |
+| Frontend | `adorable-stillness`  | https://stratagent.up.railway.app |
+
+Both auto-deploy from `main` on push. Check status without the web UI:
+
+```bash
+railway link -p nurturing-cooperation -s Consulting-Agent   # or adorable-stillness
+railway status           # deploy ID, online/offline, volume usage
+railway logs             # tail the running container
+railway deployment list  # build history (SUCCESS/FAILED/REMOVED)
+```
+
+`railway login` opens a one-time device-pairing URL if the CLI isn't
+authenticated yet.
+
 ## 3. Two services, one repo
 
 `docker-compose.yml` builds both; most PaaS deploy them as separate services.
