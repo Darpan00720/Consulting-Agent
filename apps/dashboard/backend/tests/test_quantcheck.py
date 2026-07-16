@@ -544,3 +544,61 @@ def test_missing_ledger_gets_banner_even_if_report_writer_ignores_it(
     tie_events = [e for e in db.list_events(eid) if e["type"] == "quant_tie_out"]
     assert tie_events[-1]["payload"]["passed"] is False
     db.reset_for_tests()
+
+
+def test_reflector_sees_quant_gate_defects_not_just_reviewer_notes(
+    tmp_path, monkeypatch
+):
+    """User-flagged gap (2026-07-17): two live interim reports (EspressoLux,
+    NordWear) both failed via the quant gate, but the reflector's only
+    learned lessons were generic ("test breakeven thresholds") because the
+    reviewer is explicitly told arithmetic is pre-verified and never mentions
+    ledger defects — so the reflector never saw the actual, specific,
+    mechanical failure pattern. Assert the reflector's prompt now carries the
+    quant-gate defects verbatim whenever the ledger failed, and is told to
+    prioritize ledger-discipline lessons over generic advice."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "reflect_quant.db")
+    db.reset_for_tests()
+    reflector_prompts: list[str] = []
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return "reconciliation with no ledger at all"
+        if agent == "reflector":
+            reflector_prompts.append(user)
+            return "LESSON: Always give every assumption a source and a band."
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    assert len(reflector_prompts) == 1
+    prompt = reflector_prompts[0]
+    assert "Quant-gate defects" in prompt
+    assert "no ```quant ledger block found" in prompt
+    assert "NOT judgment calls" in prompt
+    assert "highest-leverage" in prompt
+    lessons = db.list_lessons()
+    assert any("source" in row["text"] for row in lessons)
+    db.reset_for_tests()
+
+
+def test_reflector_gets_no_quant_section_when_ledger_is_clean(tmp_path, monkeypatch):
+    """When the gate passes, the reflector prompt stays as before — no empty
+    or misleading quant section clutters a genuinely clean run."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "reflect_clean.db")
+    db.reset_for_tests()
+    reflector_prompts: list[str] = []
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "reflector":
+            reflector_prompts.append(user)
+            return "NONE"
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    assert len(reflector_prompts) == 1
+    assert "Quant-gate defects" not in reflector_prompts[0]
+    db.reset_for_tests()

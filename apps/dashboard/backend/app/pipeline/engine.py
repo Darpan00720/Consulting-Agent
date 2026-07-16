@@ -1177,6 +1177,23 @@ async def _run_engagement(
         # surface caveats worth guarding against next time. One cheap call;
         # never fails the engagement.
         try:
+            # The quant gate's own defects are the MOST actionable lessons
+            # available when they exist: they are exact, machine-generated,
+            # and never visible to the reviewer (which is told arithmetic is
+            # pre-verified and to judge substance only) — so without this
+            # section the reflector only ever sees judgment notes and can
+            # never learn the mechanical ledger-discipline patterns (missing
+            # sources, un-formulated derived values, orphan numbers) that are
+            # the actual, recurring cause of interim reports.
+            quant_notes = (
+                _section(
+                    "Quant-gate defects — deterministic, machine-verified "
+                    "failures, NOT judgment calls",
+                    "\n".join(f"- {d.message}" for d in unresolved),
+                )
+                if unresolved
+                else ""
+            )
             focus = (
                 "The gates did NOT clear — extract what went wrong in the method."
                 if not review_ready
@@ -1184,11 +1201,23 @@ async def _run_engagement(
                 "flagged (caveats, near-misses) so the next engagement avoids "
                 "even those."
             )
+            if quant_notes:
+                focus += (
+                    " The QUANT GATE specifically failed. Those defects are exact "
+                    "and mechanical (a missing source field, a derived value with "
+                    "no formula, a number in the report absent from the ledger) — "
+                    "prioritize lessons that fix THIS pattern directly (e.g. "
+                    "'always give every assumption a source and a plausibility "
+                    "band', 'never write a figure in the report that isn't a "
+                    "ledger id') over generic analytical advice; these are the "
+                    "highest-leverage, most fixable lessons available."
+                )
             reflection = await call(
                 "reflector",
                 REFLECTION_SYSTEM,
                 _section("Reviewer notes", review)
                 + _section("Challenger notes", challenge)
+                + quant_notes
                 + f"\n\n{focus}\nExtract the durable process lessons (method only, "
                 "no case facts). Output `LESSON: ...` lines, or NONE.",
                 api_key=api_key,
