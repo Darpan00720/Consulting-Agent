@@ -11,12 +11,13 @@ powers a small quota-limited free tier. STRATAGENT_MOCK=1 needs no key at all.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import config, db
+from app import config, db, retention
 from app.pipeline.engine import recover_interrupted
 from app.routers import admin, engagements
 
@@ -27,7 +28,12 @@ async def lifespan(_: FastAPI):
     # Adopt runs a previous process left paused/running, so a redeploy doesn't
     # strand them on a countdown that will never fire.
     await recover_interrupted()
-    yield
+    # Enforce data retention for the process lifetime (no external cron needed).
+    purge_task = asyncio.create_task(retention.purge_loop())
+    try:
+        yield
+    finally:
+        purge_task.cancel()
 
 
 app = FastAPI(
@@ -64,4 +70,7 @@ def health() -> dict[str, object]:
         "mock": config.MOCK_MODE,
         "free_tier": config.SERVER_HAS_KEY or config.MOCK_MODE,
         "free_tier_quota": config.DAILY_ENGAGEMENT_QUOTA,
+        # So the privacy note on the landing page states the true window rather
+        # than a hardcoded number that could drift from the actual purge.
+        "retention_days": config.RETENTION_DAYS,
     }

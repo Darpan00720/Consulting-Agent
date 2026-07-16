@@ -160,6 +160,16 @@ DAILY_ENGAGEMENT_QUOTA = int(_env("STRATAGENT_DAILY_QUOTA", "5"))
 # is trusted).
 DAILY_IP_QUOTA = int(_env("STRATAGENT_DAILY_IP_QUOTA", "15"))
 
+# Data retention. Engagements (case prompt, report, event log, telemetry) are
+# HARD-deleted this many days after they start. The product has no signup, so
+# there is no channel through which a user could later ask us to delete their
+# data — an automatic purge is the honest substitute. 0 disables it (a private,
+# single-operator instance may want to keep everything).
+RETENTION_DAYS = float(_env("STRATAGENT_RETENTION_DAYS", "5"))
+# How often the purge sweep runs. Cheap (one indexed DELETE), so hourly keeps
+# the window tight without depending on an external cron.
+PURGE_INTERVAL_SECONDS = float(_env("STRATAGENT_PURGE_INTERVAL", "3600"))
+
 # IPs are PII, and this product's whole promise is that we hold nothing about
 # you. So we store a salted HASH — enough to count requests per source, useless
 # for identifying anyone, and unlinkable across deployments. A random per-boot

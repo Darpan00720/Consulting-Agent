@@ -309,6 +309,13 @@ export default function Home() {
             ~13 agents · 5–15 minutes · no account needed
           </span>
         </div>
+        <p className="muted privacy-note">
+          Privacy: no account, no tracking. Your problem statement and the
+          report are stored only to show you the result, then automatically
+          deleted after {health?.retention_days ?? 5} days. API keys are never
+          stored. Don&apos;t paste anything you can&apos;t share with a
+          third-party AI provider.
+        </p>
       </section>
 
       <section className="how">

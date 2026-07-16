@@ -73,6 +73,7 @@ export interface Health {
   mock: boolean;
   free_tier: boolean;
   free_tier_quota: number;
+  retention_days?: number;
 }
 
 export interface Lesson {

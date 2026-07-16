@@ -1380,8 +1380,7 @@ def test_migration_works_on_a_pre_existing_database(tmp_path, monkeypatch):
     dbfile = tmp_path / "legacy.db"
     # A database as it existed BEFORE ip_hash — no column, no index.
     legacy = sqlite3.connect(dbfile)
-    legacy.executescript(
-        """
+    legacy.executescript("""
         CREATE TABLE engagements (
             id TEXT PRIMARY KEY, client_id TEXT NOT NULL, case_prompt TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'queued', report_md TEXT, error TEXT,
@@ -1390,8 +1389,7 @@ def test_migration_works_on_a_pre_existing_database(tmp_path, monkeypatch):
         );
         INSERT INTO engagements (id, client_id, case_prompt, status, created_at)
         VALUES ('eng_legacy', 'old-browser', 'an older engagement', 'completed', 1.0);
-        """
-    )
+        """)
     legacy.commit()
     legacy.close()
 
@@ -1404,7 +1402,80 @@ def test_migration_works_on_a_pre_existing_database(tmp_path, monkeypatch):
     idx = {r[1] for r in conn.execute("PRAGMA index_list(engagements)")}
     assert "idx_engagements_ip" in idx, "ip_hash index missing after migration"
     # and the pre-existing row survived
-    assert conn.execute(
-        "SELECT case_prompt FROM engagements WHERE id='eng_legacy'"
-    ).fetchone()["case_prompt"] == "an older engagement"
+    assert (
+        conn.execute(
+            "SELECT case_prompt FROM engagements WHERE id='eng_legacy'"
+        ).fetchone()["case_prompt"]
+        == "an older engagement"
+    )
     db.reset_for_tests()
+
+
+def test_retention_purge_hard_deletes_old_engagements(tmp_path, monkeypatch):
+    """Engagements past the window are HARD-deleted — row, events, feedback,
+    and telemetry file — while newer ones are untouched. No signup means no
+    other way to honour a deletion, so this must actually remove the data."""
+    import time as _time
+
+    from app import retention
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "ret.db")
+    monkeypatch.setattr(config, "RETENTION_DAYS", 5.0)
+    tel = tmp_path / "telemetry"
+    tel.mkdir()
+    monkeypatch.setattr(config, "TELEMETRY_DIR", str(tel))
+    db.reset_for_tests()
+
+    old = db.create_engagement("browser-old", "an OLD confidential brief")
+    new = db.create_engagement("browser-new", "a RECENT brief")
+    # backdate the old one past the window; leave events + telemetry behind
+    conn = db.connect()
+    conn.execute(
+        "UPDATE engagements SET created_at = ? WHERE id = ?",
+        (_time.time() - 6 * 86400, old),
+    )
+    conn.commit()
+    db.append_event(old, "engagement_started", {})
+    db.add_feedback(old, "browser-old", "sensitive comment")
+    (tel / f"{old}.jsonl").write_text('{"event":"x"}\n')
+    (tel / f"{new}.jsonl").write_text('{"event":"y"}\n')
+
+    deleted = retention.purge_once()
+    assert deleted == 1
+
+    assert db.get_engagement(old) is None, "old engagement was not deleted"
+    assert db.get_engagement(new) is not None, "recent engagement wrongly deleted"
+    # cascaded to events, feedback, and the telemetry file
+    assert db.list_events(old) == []
+    assert db.list_feedback(old) == []
+    assert not (tel / f"{old}.jsonl").exists(), "old telemetry file left behind"
+    assert (tel / f"{new}.jsonl").exists(), "recent telemetry file wrongly deleted"
+    db.reset_for_tests()
+
+
+def test_retention_disabled_keeps_everything(tmp_path, monkeypatch):
+    """RETENTION_DAYS=0 means a private instance keeps all history."""
+    from app import retention
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "keep.db")
+    monkeypatch.setattr(config, "RETENTION_DAYS", 0.0)
+    db.reset_for_tests()
+    import time as _time
+
+    eid = db.create_engagement("browser-x", CASE)
+    db.connect().execute(
+        "UPDATE engagements SET created_at = ? WHERE id = ?",
+        (_time.time() - 999 * 86400, eid),
+    )
+    db.connect().commit()
+    assert retention.purge_once() == 0
+    assert db.get_engagement(eid) is not None
+    db.reset_for_tests()
+
+
+def test_health_reports_the_real_retention_window(client, monkeypatch):
+    """The landing-page privacy note reads this — it must be the true window,
+    not a hardcoded number that can drift from the actual purge."""
+    monkeypatch.setattr(config, "RETENTION_DAYS", 5.0)
+    body = client.get("/api/health").json()
+    assert body["retention_days"] == 5.0

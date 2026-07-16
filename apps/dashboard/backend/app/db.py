@@ -141,6 +141,40 @@ def reset_for_tests() -> None:
     _conn = None
 
 
+def purge_expired(max_age_days: float) -> list[str]:
+    """HARD-delete engagements older than max_age_days. Returns the deleted ids.
+
+    Data-retention (the user pastes real, confidential business briefs and there
+    is no signup through which to honour a deletion request). This is a genuine
+    DELETE, not a status flag: the case prompt, the report, and the full event
+    log are removed from disk. The caller also deletes the per-engagement
+    telemetry file — telemetry lives outside the DB.
+
+    Events go first so no row ever references a deleted engagement, and the
+    whole thing is one transaction: a crash mid-purge leaves the DB consistent,
+    not half-deleted.
+    """
+    cutoff = time.time() - max_age_days * 86400
+    with _lock:
+        conn = connect()
+        ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM engagements WHERE created_at < ?", (cutoff,)
+            )
+        ]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(f"DELETE FROM events WHERE engagement_id IN ({placeholders})", ids)
+        conn.execute(
+            f"DELETE FROM feedback WHERE engagement_id IN ({placeholders})", ids
+        )
+        conn.execute(f"DELETE FROM engagements WHERE id IN ({placeholders})", ids)
+        conn.commit()
+    return ids
+
+
 # --- engagements ------------------------------------------------------------
 
 
