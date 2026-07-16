@@ -503,3 +503,44 @@ def test_tie_out_fails_closed_and_flags_the_report(tmp_path, monkeypatch):
     )
     assert completed["payload"]["review_ready"] is False
     db.reset_for_tests()
+
+
+def test_missing_ledger_gets_banner_even_if_report_writer_ignores_it(
+    tmp_path, monkeypatch
+):
+    """Live-run regression (2026-07-16): the EM never produced a ```quant
+    block after exhausting its fix budget (quant.entries is None), yet the
+    report-writer — on a real free-tier model — ignored the "write an honest
+    interim memo" instruction and produced a fully confident final-looking
+    report with no visible caveat. The banner must be prepended
+    DETERMINISTICALLY whenever the ledger itself never validated, regardless
+    of whether the report-writer complied — it must never depend on model
+    behavior it cannot control."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "missing_ledger_banner.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 1)
+    db.reset_for_tests()
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return "reconciliation with no ledger at all"  # never emits one
+        if agent == "report-writer":
+            # Simulates a non-compliant model: a polished, confident report
+            # with none of the requested "not final" framing.
+            return "## Executive summary\n\nDo X. It will yield €12M in value."
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    engagement = db.get_engagement(eid)
+    assert "QUANT GATE — NOT REVIEW-READY" in engagement["report_md"]
+    assert "no ```quant ledger block found" in engagement["report_md"]
+    # the model's actual content is still there, just flagged, not discarded
+    assert "€12M in value" in engagement["report_md"]
+    completed = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
+    )
+    assert completed["payload"]["review_ready"] is False
+    tie_events = [e for e in db.list_events(eid) if e["type"] == "quant_tie_out"]
+    assert tie_events[-1]["payload"]["passed"] is False
+    db.reset_for_tests()

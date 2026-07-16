@@ -1091,58 +1091,78 @@ async def _run_engagement(
         )
 
         # --- Report tie-out (ADR-009 §2.3): no orphan numbers -----------------
-        # Only meaningful when the ledger itself verified (an interim memo for
-        # a failed gate is already flagged not review-ready). One bounded
-        # rework with the exact orphan list; still failing → fail closed.
-        if review_ready:
-            tie = quantcheck.tie_out(report, quant.entries, case_prompt)
-            if not tie.passed:
-                await _emit(
-                    engagement_id,
-                    "quant_tie_out",
-                    {
-                        "passed": False,
-                        "fixing": True,
-                        "defects": [d.message for d in tie.defects],
-                    },
-                )
-                report = await phase(
-                    "reporting",
-                    "report-writer",
-                    final_context
-                    + _section("Your previous report", report)
-                    + _section(
-                        "ORPHAN NUMBERS — deterministic tie-out output. Every "
-                        "one must be resolved",
-                        quantcheck.format_defects(tie),
-                    )
-                    + "\n\nRe-issue the FULL report. Replace every orphan number "
-                    "with the correct quant-ledger value (rounded for prose is "
-                    "fine) or remove the claim — never invent a bridging figure. "
-                    "Change nothing else.",
-                    checkpoint=False,
-                    max_tokens=report_budget,
-                )
-                tie = quantcheck.tie_out(report, quant.entries, case_prompt)
-            if not tie.passed:
-                review_ready = False
-                report = (
-                    "> **⚠ QUANT GATE — NOT REVIEW-READY.** The following "
-                    "figures in this report could not be verified against the "
-                    "engagement's quant ledger and must not be relied on:\n>\n"
-                    + "\n".join(f"> - {d.message}" for d in tie.defects)
-                    + "\n\n"
-                    + report
-                )
+        # Run whenever there is a parsed ledger to check against, REGARDLESS of
+        # review_ready — a report-writer prompted with "the gates did not fully
+        # clear, write an honest interim memo" is a REQUEST, not a guarantee;
+        # a live run (2026-07-16) showed a free-tier model ignore it and write
+        # a fully-confident final-looking report despite quant.passed=False.
+        # The banner below is the deterministic backstop for that non-
+        # compliance — it does not depend on the model having obeyed anything.
+        # Tie-out needs entries to check report numbers against; with no
+        # parsed ledger at all there is nothing to compare, but the report
+        # still gets the banner below via `unresolved`, seeded from
+        # quant.defects (e.g. "no ```quant ledger block found").
+        tie = (
+            quantcheck.tie_out(report, quant.entries, case_prompt)
+            if quant.entries is not None
+            else quantcheck.QuantReport(True, (), None)
+        )
+        if quant.passed and not tie.passed:
+            # Ledger was fine; only the report cited orphan numbers — worth
+            # one rework, since the fix is narrow (swap the bad figures).
             await _emit(
                 engagement_id,
                 "quant_tie_out",
                 {
-                    "passed": tie.passed,
-                    "fixing": False,
+                    "passed": False,
+                    "fixing": True,
                     "defects": [d.message for d in tie.defects],
                 },
             )
+            report = await phase(
+                "reporting",
+                "report-writer",
+                final_context
+                + _section("Your previous report", report)
+                + _section(
+                    "ORPHAN NUMBERS — deterministic tie-out output. Every "
+                    "one must be resolved",
+                    quantcheck.format_defects(tie),
+                )
+                + "\n\nRe-issue the FULL report. Replace every orphan number "
+                "with the correct quant-ledger value (rounded for prose is "
+                "fine) or remove the claim — never invent a bridging figure. "
+                "Change nothing else.",
+                checkpoint=False,
+                max_tokens=report_budget,
+            )
+            tie = quantcheck.tie_out(report, quant.entries, case_prompt)
+        # Never re-run report-writer over broken LEDGER math (as opposed to an
+        # orphan-number miss) — the EM already exhausted its fix budget; asking
+        # report-writer to "fix" arithmetic it didn't produce just burns a
+        # call. Report the defects verbatim instead of hiding them.
+        unresolved = (list(quant.defects) if not quant.passed else []) + (
+            [] if tie.passed else list(tie.defects)
+        )
+        if unresolved:
+            review_ready = False
+            report = (
+                "> **⚠ QUANT GATE — NOT REVIEW-READY.** The figures in this "
+                "report have NOT been machine-verified and must not be relied "
+                "on. Deterministic defects:\n>\n"
+                + "\n".join(f"> - {d.message}" for d in unresolved)
+                + "\n\n"
+                + report
+            )
+        await _emit(
+            engagement_id,
+            "quant_tie_out",
+            {
+                "passed": not unresolved,
+                "fixing": False,
+                "defects": [d.message for d in unresolved],
+            },
+        )
 
         db.set_engagement_status(engagement_id, "completed", report_md=report)
         db.set_governance(
