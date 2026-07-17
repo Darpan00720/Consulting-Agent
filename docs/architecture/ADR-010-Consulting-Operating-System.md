@@ -298,6 +298,129 @@ No forced cutover. Three fallback layers, each independently tested:
   be an additive persistence layer behind the same `EvidenceStore` interface,
   not a redesign.
 
+## 6b. Phase 3 — Consulting Intelligence Layer (implemented 2026-07-17, partial)
+
+**The finding that reshapes this phase, documented before any code was
+written (per this phase's own working style — "identify architectural
+weaknesses before implementing").**
+
+P1 and P2 succeeded because they targeted things that have exactly one
+correct, computable answer: a formula's value, a unit's canonical spelling, a
+JSON shape's validity. P3's brief lists seventeen "architectural goals" —
+MECE decomposition, hypothesis generation, strategic reasoning, root-cause
+analysis, option generation, capability assessment. **Most of these do not
+have a computable answer.** There is no algorithm that produces "the MECE
+issue tree" for an arbitrary business problem — MECE decomposition of an
+open-ended problem is not a solved formal problem, it *is* consulting
+judgment, and judgment requires an LLM. Writing a Python function called
+`generate_issue_tree()` that claims to do this deterministically would be one
+of two things: a thin wrapper that still calls an LLM internally, dressed up
+as a "deterministic service" (engineering theater — the opposite of every
+other decision in this ADR), or an attempt to encode general reasoning in
+rules (AI-complete; not attempted).
+
+**The line this phase actually draws, consistent with P1/P2's own
+philosophy** (LLM proposes, code computes/validates/ranks — never trusting
+the LLM's own claimed answer for anything with a right answer):
+
+| Genuinely deterministic (built, real code) | Requires LLM judgment (contract defined, generation NOT rewritten this phase) |
+|---|---|
+| Sensitivity analysis — re-evaluates P1's own ledger arithmetic at each assumption's low/high bound | Case understanding synthesis (objectives, stakeholders, constraints from raw text) |
+| Scenario evaluation — re-evaluates the ledger under named assumption-overrides | MECE issue-tree *generation* (only its structural completeness is checked, not generated) |
+| Dependency graph — cycle detection + topological sort over declared edges | Hypothesis *generation* (only its lifecycle/evidence-linkage is tracked, not generated) |
+| Recommendation ranking — weighted multi-criteria formula over LLM-declared per-option scores | Strategic reasoning, root-cause narrative, second-order effects |
+| MECE/hypothesis/coverage/capability **validators** — structural completeness checks | Option generation, research-plan authoring |
+
+The right column is not skipped — it is exactly what the existing agents
+(`case-classifier`, `issue-tree-generator`, `information-gap`, `planner`, the
+five analysts) already do, and continue to do, as LLM calls. This phase's job
+is to give their output **typed, machine-checkable contracts** (so Governance
+in P4 can consume structure, not prose) and to build the pieces that are
+genuinely code's job. Rewriting five existing agent prompts to emit these new
+contracts is real, substantial work (each is a separate file, each already
+tuned against the free-tier token budget) — it is scoped as explicit follow-on
+work below, not silently skipped.
+
+### What's built and LIVE-WIRED (runs on every real engagement)
+
+`sensitivity_analysis.py` and `scenario_evaluator.py` run immediately after
+the Quant Gate passes (§ADR-009) — pure functions of an already machine-verified
+ledger, zero new LLM calls, so wiring them into the live path carries the same
+low risk as P1's gate itself:
+
+- **Sensitivity**: for every assumption atom in the verified ledger, every
+  formula that depends on it (directly or transitively, via the same DAG
+  P1 already builds for cycle detection) is re-evaluated at the assumption's
+  stated `low` and `high` — reusing `quantcheck._eval` unmodified — and the
+  results are ranked by swing magnitude. This is the mechanical form of "which
+  assumption would flip the recommendation", computed, not asserted.
+- **Scenario evaluation**: given named assumption-override sets (still an LLM
+  proposal — deciding *which* scenarios matter is judgment — but each
+  scenario's *numeric consequence* is computed, never narrated), the ledger's
+  derived values are recomputed under each override set via the identical
+  arithmetic path.
+- **Dependency graph**: a real graph (adjacency list, DFS cycle detection,
+  Kahn topological sort — the same algorithm shape as P1's formula-dependency
+  cycle check) over LLM-declared dependency edges, exposed for Governance
+  (P4) to query "what blocks this recommendation" and "in what order can these
+  execute."
+
+### What's built and TESTED but NOT yet wired into the live pipeline
+
+`consulting_schema.py` (typed contracts: `CaseDefinition`, `IssueNode`,
+`Hypothesis`, `ResearchTask`, `StrategicOption`, `Recommendation`,
+`DependencyEdge`, `ScenarioAssumption`, `CapabilityFlag`),
+`consulting_validators.py` (MECE structural-completeness check, hypothesis
+evidence-linkage + auto-retire, research-plan coverage, capability gating),
+and `recommendation_ranker.py` (weighted multi-criteria ranking over
+LLM-declared per-option scores) are complete, unit-tested modules with the
+exact contract Governance (P4) needs — but the existing `issue-tree-generator`,
+`information-gap`, `planner`, and analyst agent prompts have not yet been
+rewritten to emit these new structured shapes; today they still emit the
+markdown/prose formats P1/P2 already handle. Wiring these requires editing
+five separately-tuned agent prompt files and re-verifying each against the
+free-tier token budget — real, scoped, separately-approved work, not
+completed in this pass. Governance (P4) can be built against these contracts
+today (they are stable and tested); making the *live* case-classifier/
+issue-tree/hypothesis output actually populate them is the honest remaining
+gap.
+
+### Recommendation ranker mechanics
+
+The LLM proposes N strategic options, each scored 0–1 (or an equivalent
+declared scale) on: `strategic_value`, `business_impact`, `complexity` (cost,
+inverted in the formula), `execution_risk` (inverted), `confidence`,
+`evidence_quality`, `dependency_count` (inverted), `time_to_value_months`
+(inverted). The ranker applies one explicit, documented weighted-sum formula
+and returns the ordered list — the FINAL rank is never the LLM's own claimed
+ordering, exactly as a derived ledger value is never the LLM's own claimed
+number. A weak option (composite score below a stated floor) is flagged
+`rejected`, not silently ranked last, per the spec's "reject weak
+recommendations."
+
+### Known limitations
+
+- The live wiring gap above (schema/validator/ranker built, agent prompts not
+  yet rewritten to feed them) is the central limitation — see the table.
+- MECE completeness checking is **structural**, not semantic: it verifies no
+  duplicate scope tags, every leaf has an owner and ≥1 hypothesis reference,
+  and hypotheses reference ≥1 evidence atom. It cannot verify that two
+  differently-worded branches are *actually* mutually exclusive in meaning —
+  that remains a human/reviewer judgment, same as it is today.
+- The ranker's weights are one documented, reasonable default — not tuned
+  against real engagements yet (no live validation performed this phase,
+  consistent with P1/P2's own history of "proven by tests first").
+
+### Future extensibility
+
+- P4's Governance/Board-Simulation layer is the natural consumer of
+  `consulting_schema.py`'s contracts, `dependency_graph.py`'s graph, and
+  `recommendation_ranker.py`'s ranking — designed for that consumption now
+  rather than retrofitted later.
+- Rewiring the five agent prompts to emit these contracts (the flagged gap
+  above) can happen incrementally, one agent at a time, each independently
+  testable — the same pattern P1/P2 already established.
+
 ## 7. What I am asking to decide
 
 1. **Adopt the "unify, don't rebuild" thesis** (§1) — i.e. v2.0 is delivered by

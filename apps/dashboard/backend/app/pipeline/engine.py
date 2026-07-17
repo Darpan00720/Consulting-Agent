@@ -31,6 +31,7 @@ from app.pipeline import (
     ledger_builder,
     prompts,
     quantcheck,
+    sensitivity_analysis,
 )
 from app.pipeline.claude import call_agent, friendly_error
 from app.pipeline.providers import AllProvidersRateLimitedError
@@ -1114,6 +1115,44 @@ async def _run_engagement(
             and challenge_verdict in ("stands", "stands_with_caveats")
         )
 
+        # --- Sensitivity analysis (ADR-010 P3) --------------------------------
+        # Pure function of an already-verified ledger — zero new LLM calls, so
+        # this runs unconditionally whenever there IS a verified ledger to
+        # analyze. "Which assumption would flip the recommendation" becomes a
+        # computed ranking instead of the report-writer's own guess.
+        sensitivity_section = ""
+        if quant.passed and quant.entries:
+            top_sensitivity = sensitivity_analysis.analyze_sensitivity(quant.entries)
+            await _emit(
+                engagement_id,
+                "sensitivity_analyzed",
+                {
+                    "results": [
+                        {
+                            "assumption_id": r.assumption_id,
+                            "swing": str(r.swing),
+                            "affected": list(r.affected),
+                        }
+                        for r in top_sensitivity
+                    ]
+                },
+            )
+            if top_sensitivity:
+                sensitivity_section = _section(
+                    "COMPUTED SENSITIVITY RANKING (ADR-010 P3 — exact, not a " "guess)",
+                    "Every assumption with a plausibility band was re-evaluated "
+                    "at its low and high bound against the verified ledger; "
+                    "ranked by the largest resulting swing in any dependent "
+                    "figure. Use this — do not independently guess which "
+                    "assumption matters most.\n"
+                    + "\n".join(
+                        f"- {r.assumption_id}: swinging between its stated "
+                        f"low ({r.low_value}) and high ({r.high_value}) moves "
+                        f"{', '.join(r.affected)} by up to {r.swing}."
+                        for r in top_sensitivity[:5]
+                    ),
+                )
+
         report_budget = (
             config.REPORT_MAX_TOKENS
             + 220 * len(prompts.explicit_questions(case_prompt))
@@ -1126,6 +1165,7 @@ async def _run_engagement(
             final_context
             + _section("Reviewer notes", review)
             + _section("Challenger notes", challenge)
+            + sensitivity_section
             + f"\n\nGovernance state: reviewer={review_verdict},"
             + f" challenger={challenge_verdict},"
             + f" quant-gate={'verified' if quant.passed else 'FAILED'}. "
