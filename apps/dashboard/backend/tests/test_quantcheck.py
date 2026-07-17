@@ -196,6 +196,18 @@ def test_division_by_zero_and_bad_exponent():
     assert any("non-integer exponent" in d.message for d in report.defects)
 
 
+def test_oversized_exponent_rejected():
+    """A huge integer exponent is refused (bounded work; no real formula needs
+    a power > 100) — defense against a pathological ledger."""
+    huge = (
+        f"{FACT},"
+        '{"id":"D1","kind":"derived","label":"x","value":1,'
+        '"unit":"EUR_M","formula":"F1 ** 1000000"}'
+    )
+    report = quantcheck.verify_ledger(_ledger(huge))
+    assert any("out of range" in d.message for d in report.defects)
+
+
 # --- units & basis (Q4) ----------------------------------------------------------
 
 

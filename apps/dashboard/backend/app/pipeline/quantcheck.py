@@ -46,6 +46,10 @@ KINDS = ("fact", "assumption", "derived")
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _QUANT_BLOCK_RE = re.compile(r"```quant\s*\n(.*?)```", re.S)
 
+# Upper bound on a `**` exponent in a ledger formula. Decimal's context caps the
+# result magnitude anyway; this keeps evaluation cheap and rejects nonsense.
+_MAX_EXPONENT = 100
+
 
 @dataclass(frozen=True)
 class QuantDefect:
@@ -226,6 +230,14 @@ def _eval(node: ast.AST, values: Mapping[str, Decimal]) -> Decimal:
                 raise _FormulaError(
                     "non-integer exponent — precompute that factor as its own "
                     "derived entry"
+                )
+            # Bound the exponent explicitly. Decimal's context already caps the
+            # result magnitude, but a huge exponent still means a large int and
+            # needless work; no real financial formula needs |exponent| > 100.
+            if abs(right) > _MAX_EXPONENT:
+                raise _FormulaError(
+                    f"exponent {right} is out of range (max {_MAX_EXPONENT}) — "
+                    "a financial formula should not need a power this large"
                 )
             return left ** int(right)
     raise _FormulaError(f"unsupported node {type(node).__name__}")

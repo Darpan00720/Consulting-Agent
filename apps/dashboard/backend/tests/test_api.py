@@ -708,7 +708,11 @@ def test_engagement_rejects_malformed_images(client):
 
 def test_aggregate_payload_ceiling(client):
     """Per-field caps allow ~42 MB in aggregate; the whole-request ceiling must
-    reject that so one request can't pin memory or starve concurrent runs."""
+    reject that so one request can't pin memory or starve concurrent runs.
+
+    This ~26 MB request still reaches Pydantic (under the 32 MB coarse ASGI
+    backstop) and is rejected there with a precise 422 — the accurate limit for
+    a "slightly too large" request stays intact after the backstop was added."""
     big = [
         "data:image/png;base64," + "A" * 6_500_000 for _ in range(4)
     ]  # ~26 MB total, each image individually under the 7 MB per-image cap
@@ -718,6 +722,85 @@ def test_aggregate_payload_ceiling(client):
         headers=CID_A,
     )
     assert resp.status_code == 422
+
+
+def test_asgi_body_ceiling_rejects_unbounded_body_before_buffering():
+    """The ASGI backstop rejects an over-large body at the transport layer with
+    a 413 — for both a declared Content-Length and a chunked/streamed body that
+    lies about (or omits) its length — so a multi-GB body can never buffer into
+    memory ahead of Pydantic's caps. Uses a tiny cap and a raw ASGI harness so
+    the test is fast and does not allocate real gigabytes."""
+    import asyncio
+
+    from app.main import MaxBodySizeMiddleware
+
+    async def ok_app(scope, receive, send):
+        # Drain the body, then 200 — the middleware must let small bodies through.
+        while True:
+            msg = await receive()
+            if not msg.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    app = MaxBodySizeMiddleware(ok_app, max_bytes=1000)
+
+    async def call(headers, chunks):
+        sent = []
+        chunk_iter = iter(chunks)
+
+        async def receive():
+            try:
+                body = next(chunk_iter)
+                return {
+                    "type": "http.request",
+                    "body": body,
+                    "more_body": True,
+                }
+            except StopIteration:
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "headers": headers}
+        await app(scope, receive, send)
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        return start["status"]
+
+    # Fast path: honest, over-large Content-Length → 413 before any body read.
+    status = asyncio.run(call([(b"content-length", b"5000")], [b"x" * 5000]))
+    assert status == 413
+
+    # Streamed / lying length: no Content-Length, body crosses the cap mid-stream.
+    status = asyncio.run(call([], [b"x" * 400, b"x" * 400, b"x" * 400]))
+    assert status == 413
+
+    # Legitimate small body passes through untouched.
+    status = asyncio.run(call([], [b"x" * 200]))
+    assert status == 200
+
+
+def test_cors_does_not_advertise_credentials(client):
+    """Auth is header-based (X-Client-Id / X-Admin-Token), so credentialed CORS
+    is off — a misconfigured '*' origin can never be paired with credentials."""
+    resp = client.options(
+        "/api/engagements",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-credentials" not in {k.lower() for k in resp.headers}
+
+
+def test_framework_note_rejects_path_traversal():
+    """framework_note joins a name onto a filesystem path; a traversal name must
+    be refused (defense in depth — names come from globbed vault files today)."""
+    from app.pipeline import prompts
+
+    for evil in ["../config", "../../etc/passwd", "a/b", "..\\..\\x", ".."]:
+        assert prompts.framework_note(evil) is None
 
 
 def test_pasted_images_never_persisted(client, tmp_path):

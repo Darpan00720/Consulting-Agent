@@ -39,9 +39,20 @@ def vault_framework_index() -> str:
 
 
 def framework_note(name: str) -> str | None:
-    """Full text of one vault framework note, if it exists."""
-    path = config.VAULT_FRAMEWORKS_DIR / f"{name}.md"
-    if not path.is_file():
+    """Full text of one vault framework note, if it exists.
+
+    ``name`` is expected to be a bare note stem (today it only ever comes from
+    globbed vault filenames), but this is the one place a caller-influenced
+    string is joined to a filesystem path — so it is defended in depth against
+    traversal: a name with a path separator or ``..`` is rejected, and the
+    resolved path is confirmed to sit inside the vault directory before any
+    read. A malformed name returns ``None``, exactly like a missing note.
+    """
+    if not name or "/" in name or "\\" in name or ".." in name:
+        return None
+    vault = config.VAULT_FRAMEWORKS_DIR.resolve()
+    path = (vault / f"{name}.md").resolve()
+    if vault not in path.parents or not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
 
