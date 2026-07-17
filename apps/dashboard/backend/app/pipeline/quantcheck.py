@@ -786,3 +786,32 @@ def format_defects(report: QuantReport) -> str:
     """The defect list as a deterministic rework brief."""
     lines = [f"{i}. [{d.check}] {d.message}" for i, d in enumerate(report.defects, 1)]
     return "\n".join(lines)
+
+
+# --- Decimal-safe JSON (shared by ledger_builder.py and evidence_store.py) --
+
+# Wrap each Decimal in a sentinel so json.dumps emits it as a quoted string,
+# then strip the quotes so the ledger carries a bare NUMBER — verify_ledger
+# re-parses with parse_float=Decimal and rejects a stringified value. The
+# token is printable ASCII (json does not escape it, unlike a NUL byte) and
+# the unquote only fires on sentinel-wrapped NUMERIC content, so it can never
+# mangle a label. default() is invoked only for Decimal objects, so nothing
+# but a real value is ever wrapped. Extracted here (rather than duplicated in
+# both ADR-010 modules that build ledger-shaped JSON) because this is the
+# lowest-level module both already depend on for the Decimal-exact contract.
+_DEC_SENTINEL = "@@DEC@@"
+_DEC_UNQUOTE = re.compile(
+    '"' + _DEC_SENTINEL + r"(-?[0-9][0-9.eE+\-]*)" + _DEC_SENTINEL + '"'
+)
+
+
+def dump_decimal_json(rows: list[dict[str, object]]) -> str:
+    """``json.dumps`` that preserves ``Decimal`` values as bare JSON numbers."""
+
+    def _default(o: object) -> object:
+        if isinstance(o, Decimal):
+            return f"{_DEC_SENTINEL}{o}{_DEC_SENTINEL}"
+        raise TypeError(f"not serializable: {type(o).__name__}")
+
+    text = json.dumps(rows, indent=1, default=_default)
+    return _DEC_UNQUOTE.sub(lambda m: m.group(1), text)

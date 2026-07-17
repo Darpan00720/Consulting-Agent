@@ -1,7 +1,7 @@
 ---
 adr: 010
 title: StratAgent as a Consulting Operating System — unify, don't rebuild
-status: Proposed
+status: Accepted (P1 + P2 implemented 2026-07-17)
 date: 2026-07-17
 deciders: [Principal Architect]
 relates: [ADR-008 Repository Topology, ADR-009 Deterministic Quant Gate, v2.0 Spec]
@@ -10,9 +10,12 @@ tags: [architecture, determinism, evidence, governance, roadmap]
 
 # ADR-010 — StratAgent as a Consulting Operating System
 
-> **Status:** Proposed. This is a design + phased roadmap in response to the
-> "StratAgent v2.0" specification. It deliberately does **not** change code:
-> the change it proposes is large, touches a working revenue-facing pipeline,
+> **Status:** Accepted; P1 (Deterministic Ledger Builder) and P2 (Structured
+> Evidence Platform) are implemented and merged — see §6/§6a. P3 (full core
+> unification), P4 (Business-Plausibility Engine), and P5 (Board Simulation)
+> remain future work, each requiring its own go-ahead. This is a design +
+> phased roadmap in response to the "StratAgent v2.0" specification. Every
+> phase touches a working revenue-facing pipeline,
 > and the project's standing rule is design-first with an approval gate. The
 > v2.0 spec agrees ("architecture before prompting", "understand architecture
 > before changing code", "never rush").
@@ -109,7 +112,7 @@ G1 closes the loop on the other side (no number in the ledger the LLM authored).
 | Phase | Deliverable | Fixes | Risk |
 |---|---|---|---|
 | **P1** ✅ | **Deterministic Ledger Builder (G1).** DONE (2026-07-17). `ledger_builder.py`: EM emits a ```atoms block; code mints ids, translates key-refs→id-formulas, **computes every derived value** (LLM value ignored), emits the ```quant block the gate verifies. Wired into `quant_verified`; builder errors feed the existing rework loop; backward compatible (no atoms block → pass-through). 16 tests. | The 7/7 failure | Medium — changes EM + analyst contracts |
-| **P2** | **Structured analyst output (G2).** Analysts emit `AnalysisBlock` JSON; markdown is rendered from it. | Traceability, provenance | Medium |
+| **P2** ✅ | **Structured Evidence Platform (G2).** DONE (2026-07-17). Analysts emit `evidence` atoms (own domain, own provenance); a Validator/Normalizer/Store pipeline aggregates them into one canonical, deduplicated, unit-consistent set that seeds the EM's reconciliation. 30 tests. | Traceability, provenance, upstream data quality | Medium |
 | **P3** | **Unify onto the core.** Live pipeline builds a real `EngagementState` (state/evidence/governance packages) instead of passing markdown; retires the dashboard's parallel logic. Resolves ADR-008. | Duplication, drift | High — largest migration |
 | **P4** | **Business-Plausibility Engine (G3).** | Unrealistic recommendations | Low |
 | **P5** | **Board Simulation (G4).** | Approvability | Low |
@@ -142,6 +145,158 @@ have de-risked the evidence-atom contract that P3 depends on.
 The LLM supplies *evidence*; code supplies *structure and arithmetic*. The Quant
 Gate remains the proof. This is testable in isolation with golden atom-sets
 (including the EspressoLux/MediCore atoms) and does not require the P3 migration.
+
+## 6a. Phase 2 — Structured Evidence Platform (implemented 2026-07-17)
+
+**Goal:** move the *last* place an LLM invents structure — analysts writing
+free prose the Engagement Manager has to re-derive atoms from — into typed,
+validated, normalized evidence. P1 fixed "the EM authors the ledger"; P2 fixes
+"the EM has to reverse-engineer atoms from five paragraphs of prose."
+
+**Target pipeline (spec's Task 6), realized inside the existing asyncio
+orchestrator — not a new framework.** The spec's diagram names LangGraph;
+this codebase has no LangGraph anywhere (orchestration is `engine.py`'s plain
+sequential `phase()`/`run_analyst()` calls). Introducing a new orchestration
+framework would itself violate the phase's own "reuse, don't duplicate"
+principle, so Task 6's *shape* — Analysts → Evidence Validator → Evidence
+Normalizer → Evidence Store → Ledger Builder → Quant Gate → existing review
+flow — is implemented as four new steps inside the existing orchestrator:
+
+```
+5 analysts (parallel domains, own ```evidence block each)
+        │  each analyst's block validated INDEPENDENTLY
+        ▼
+Evidence Validator   (evidence_schema.py)   — malformed block REJECTED, not passed on
+        ▼
+Evidence Normalizer  (evidence_normalizer.py) — units/currency/%/confidence/alias/dedup
+        ▼
+Evidence Store       (evidence_store.py)    — canonical, queryable, one per engagement
+        ▼
+   .to_atoms_block()  ── bridges into Phase 1, UNCHANGED ──▶  Ledger Builder ──▶ Quant Gate
+        ▼ (seeded into, not replacing, the EM's context)
+Engagement Manager   — resolves any flagged conflicts, re-emits final ```atoms
+        ▼
+   reviewer → challenger → report-writer   (ADR-006, untouched)
+```
+
+The Engagement Manager is **not removed** (the spec's diagram omits it, but
+deleting it would be exactly the kind of "redesign P1" the brief forbade).
+Its job shrinks from "invent atoms from prose" to "resolve the handful of
+conflicts the Normalizer could not adjudicate" — judgment stays a judgment
+call, structure stops being one.
+
+### Canonical evidence schema (v1)
+
+`app/pipeline/evidence_schema.py`, `EvidenceAtom` (frozen dataclass),
+`SCHEMA_VERSION = 1`:
+
+| Field | Notes |
+|---|---|
+| `schema_version`, `atom_id`, `category`, `type`, `title`, `unit` | always required |
+| `scope` | **added beyond the spec's example list** — P1's Quant Gate uses a time-basis scope (`"annual"` vs `"cumulative_3yr"`) to catch basis-mixing; omitting it would make the Store→Ledger-Builder bridge lossy relative to what P1 already verifies. Justified by the phase's own "reuse ADR-009" principle. |
+| `description`, `confidence`, `confidence_reason` | advisory |
+| `value` | facts/assumptions only; a `derived` atom's stray value is *ignored*, never trusted (same P1 discipline) |
+| `source_type`, `source_reference` | required for facts/assumptions ("missing provenance" is a hard reject) |
+| `assumptions`, `dependencies` | lists of other atoms' `atom_id` |
+| `formula` | derived atoms only, over other atoms' `atom_id` — never over ids, since ids don't exist until the Store bridges to Phase 1 |
+| `low`, `high`, `anchor`, `bridge` | same semantics as P1's ledger entries |
+| `created_by`, `created_at` | provenance — which analyst, when |
+| `validation_state`, `status` | lifecycle (below) |
+
+**Versioning:** `_ALLOWED_FIELDS` is an explicit allow-list; a v2 schema adds
+fields to it but must not repurpose or remove a v1 field, so a v1 atom is
+always readable by v2+ code without a migration pass.
+
+### Evidence lifecycle
+
+```
+unvalidated  →  (Schema)     rejected  (malformed — dropped, analyst's prose still used)
+             │
+             ▼  valid
+   open      →  (Normalizer) normalized  (units/currency/%/confidence canonicalized,
+             │                            aliases merged, exact duplicates collapsed)
+             ▼
+   conflict  ←  two analysts defined the same (post-alias) atom_id differently —
+                BOTH kept, tagged, surfaced to the EM as a `key__creator` dangling
+                reference at ledger-build time (never silently adjudicated)
+             │
+             ▼  EM resolves
+   resolved  →  folds into the canonical ```atoms block Phase 1 verifies
+```
+
+### Validation rules enforced (Task 5)
+
+Schema-layer (hard reject, whole block thrown out — an analyst's evidence is
+all-or-nothing): unknown fields, wrong types, invalid category/type/confidence
+shape, missing required fields, missing provenance, duplicate `atom_id` within
+one block, malformed formula (reusing P1's AST parser — same sandboxed
+`+ - * / **` grammar, no calls/attributes/imports reachable), a formula
+referencing no other atom, a dependency that isn't a slug, an assumption whose
+value sits outside its own low/high band.
+
+Normalizer-layer (soft, corrects representation, never invents a value):
+currency/unit spelling (`"$M"` → `USD_M`), percentage→ratio (converting the
+*band* together with the value — a real bug caught and fixed during this
+implementation: converting only the value while leaving a percentage-scaled
+band produces an atom that fails its own bounds check), confidence synonyms
+and numeric confidences → the 3-level scale, alias resolution (explicit map +
+normalized-title matching), duplicate collapse.
+
+### Migration strategy / backward compatibility (Task 7)
+
+No forced cutover. Three fallback layers, each independently tested:
+
+1. One analyst's evidence block is malformed → **that analyst's atoms are
+   dropped**, its prose still reaches the EM exactly as before Phase 2. The
+   engagement does not fail.
+2. **Every** analyst produces no evidence block at all (the entire pre-Phase-2
+   world, including today's mock mode) → the Evidence Store is empty, the EM
+   receives no pre-validated seed section, and falls back to **exactly**
+   Phase 1's tested from-prose atom authoring. Verified: all 139 pre-Phase-2
+   tests pass unmodified after this phase's changes.
+3. A genuine cross-analyst conflict is never silently resolved by the
+   Normalizer — it is surfaced as a dangling `key__creator` reference at
+   ledger-build time, which routes back to the EM's existing rework loop
+   (unchanged from Phase 1).
+
+### Known limitations
+
+- **The Store is in-process and per-engagement, not persisted.** It is built
+  fresh from that run's analyst atoms and discarded after reconciliation.
+  Persisting the evidence lifecycle durably (a DB migration, retention policy,
+  query surface across engagements) is a separate, larger decision the phase's
+  own scope ("focus exclusively on the evidence platform") does not take on.
+- **Token budget trade-off.** Analysts run on a free-tier chain with a hard
+  ~2000-token output cap. The prose lead was cut from "under 500 words" to
+  "under 120 words" to make room for the evidence block — a real, deliberate
+  trade rather than an oversight; structured atoms are more information-dense
+  per token than prose, which is the actual point of the phase, but it means
+  less narrative color reaches the reviewer/report-writer than before.
+- **Alias resolution is a small explicit map + literal title-normalization,
+  not semantic matching.** Two analysts naming the same concept in genuinely
+  different words (not synonyms in `ALIAS_MAP`, not near-identical titles)
+  will not be merged and may surface as a false "conflict" for the EM to
+  resolve — a false positive is safe (it costs one EM judgment call), a false
+  merge would not be, so the asymmetry is intentional.
+- **Not yet proven on a live, complex, real engagement.** P1's mechanism was
+  validated the same way (unit tests + mock e2e) before a live MediCore-class
+  run was the actual proof; the same live validation step is the natural next
+  action for P2, not yet performed.
+
+### Future extensibility
+
+- A v2 schema can add fields (e.g. a numeric confidence interval alongside the
+  3-level label) without breaking v1 atoms already in flight.
+- `evidence_store.py`'s lookup surface (`by_category`, `by_source`,
+  `dependents_of`, `provenance`) is designed to be exactly what a future
+  Business-Plausibility Engine (P4) or Board Simulation (P5) would query
+  against — those phases can read the Store directly rather than re-deriving
+  structure from a report, without any change to this phase's code.
+- If evidence *does* eventually need to persist across engagements (e.g. to
+  detect "this assumption has been wrong three engagements running"), the
+  Store's atoms are already the right shape to write to a table — that would
+  be an additive persistence layer behind the same `EvidenceStore` interface,
+  not a redesign.
 
 ## 7. What I am asking to decide
 

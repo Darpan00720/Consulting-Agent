@@ -24,7 +24,14 @@ from typing import Any
 from app import config, db
 from app import telemetry_bridge as telemetry
 from app.events import bus
-from app.pipeline import ledger_builder, prompts, quantcheck
+from app.pipeline import (
+    evidence_normalizer,
+    evidence_schema,
+    evidence_store,
+    ledger_builder,
+    prompts,
+    quantcheck,
+)
 from app.pipeline.claude import call_agent, friendly_error
 from app.pipeline.providers import AllProvidersRateLimitedError
 
@@ -122,6 +129,17 @@ ANALYSTS = [
     "strategy-analyst",
     "risk-analyst",
 ]
+
+# ADR-010 Phase 2: each analyst emits evidence atoms scoped to its own domain
+# category, so the Evidence Validator/Store can attribute and query atoms by
+# category without guessing from the agent name at query time.
+_EVIDENCE_CATEGORY = {
+    "financial-analyst": "financial",
+    "market-analyst": "market",
+    "operations-analyst": "operational",
+    "strategy-analyst": "strategic",
+    "risk-analyst": "risk",
+}
 
 PHASES = [
     ("classify", "case-classifier"),
@@ -651,16 +669,45 @@ async def _run_engagement(
                     if agent == "financial-analyst"
                     else ""
                 )
+                category = _EVIDENCE_CATEGORY[agent]
+                evidence_rule = (
+                    "\n\nEnd your response with a ```evidence fenced JSON array — "
+                    "ADR-010 Phase 2: this is now your PRIMARY, machine-read output; "
+                    "the platform builds the ledger from atoms, never from your "
+                    "prose. Every atom needs 'category':\""
+                    + category
+                    + '". Three kinds:\n'
+                    '  {"atom_id":"revenue","category":"'
+                    + category
+                    + '","type":"fact","title":"Annual revenue",'
+                    '"value":324,"unit":"EUR_M","scope":"annual",'
+                    '"source_type":"client_fact"}\n'
+                    '  {"atom_id":"delivery_share","category":"'
+                    + category
+                    + '","type":"assumption","title":"Delivery share of sales",'
+                    '"value":0.20,"unit":"RATIO","scope":"annual",'
+                    '"source_type":"analyst_estimate","low":0.10,"high":0.25}\n'
+                    '  {"atom_id":"drain","category":"'
+                    + category
+                    + '","type":"derived","title":"Delivery commission drain",'
+                    '"unit":"EUR_M","scope":"annual",'
+                    '"formula":"revenue * delivery_share * commission_rate"}\n'
+                    "'fact'/'assumption' need value+source_type (client_fact, "
+                    "benchmark, analyst_estimate, or external_research); an "
+                    "'assumption' also needs low/high. A 'derived' atom gives ONLY "
+                    "'formula' over other atoms' atom_id — never a value; it is "
+                    "computed for you. Rates are RATIO (0.20), never PCT/'%'. "
+                    "atom_id is a slug (letters/digits/underscore)."
+                )
                 result = await call(
                     agent,
                     prompts.agent_system_prompt(agent),
                     analyst_base_context
                     + f"\n\nAnswer only the issue-tree branches owned by the {agent}. "
-                    "Produce concise, quantified analysis. Label every assumption "
-                    "with a sequentially numbered ID: `[ASSUMPTION AL-1: ...]`, "
-                    "`[ASSUMPTION AL-2: ...]`, and so on — never output a literal "
-                    "placeholder like 'AL-xx'. Keep total response under 500 words."
-                    + bridge_rule,
+                    "Lead with ONE short paragraph (under 120 words) naming your "
+                    "headline finding — the evidence block below is what carries "
+                    "the actual analysis; do not repeat figures in prose that "
+                    "belong in an atom." + bridge_rule + evidence_rule,
                     api_key=api_key,
                     model=model,
                     images=images,
@@ -701,17 +748,74 @@ async def _run_engagement(
                 },
             )
 
+        # --- Evidence Validator -> Normalizer -> Store (ADR-010 Phase 2) -----
+        # Each analyst emitted its OWN evidence atoms (category-scoped). A
+        # malformed block is REJECTED here (Task 5) rather than silently
+        # passed downstream — but rejection only drops that analyst's atoms;
+        # its prose still reaches the EM below, so one analyst's bad JSON
+        # never fails the engagement (Task 7 backward compatibility).
+        evidence_errors: dict[str, tuple[str, ...]] = {}
+        validated_atoms: list[evidence_schema.EvidenceAtom] = []
+        for agent in ANALYSTS:
+            parsed = evidence_schema.parse_evidence_block(
+                analyst_outputs[agent], created_by=agent
+            )
+            if parsed.errors:
+                evidence_errors[agent] = parsed.errors
+                continue
+            validated_atoms.extend(parsed.atoms)
+
+        normalized = evidence_normalizer.normalize(validated_atoms)
+        evidence_store_obj = evidence_store.build_store(list(normalized.atoms))
+        await _emit(
+            engagement_id,
+            "evidence_validated",
+            {
+                "atoms": len(evidence_store_obj),
+                "rejected_analysts": sorted(evidence_errors),
+                "validator_errors": [
+                    msg for errs in evidence_errors.values() for msg in errs
+                ],
+                "normalizer_warnings": list(normalized.warnings),
+                "conflicts": [a.atom_id for a in evidence_store_obj.conflicts()],
+            },
+        )
+
         # --- Engagement Manager reconciliation + governance (ADR-006) --------
         # Context budget: Groq 6 k TPM. Reconcile receives ONLY analyst outputs
         # (not the full accumulated phase history) to keep input ≤ 4 000 tokens.
         analysis_detail = _section(
             "Analyst findings (supporting detail)", render_analysis()
         )
+        # The Store's pre-validated, pre-normalized atoms — when any analyst
+        # produced valid evidence — so the EM reconciles a STRUCTURED starting
+        # point instead of re-deriving atoms from prose alone. Empty when no
+        # analyst produced a parseable evidence block, in which case the EM
+        # falls back to exactly Phase 1's tested from-prose behavior.
+        evidence_section = (
+            _section(
+                "PRE-VALIDATED EVIDENCE (already extracted, unit/currency/"
+                "percentage-normalized, and deduplicated from the analysts' "
+                "structured evidence — ADR-010 Phase 2)",
+                "```atoms\n" + evidence_store_obj.to_atoms_block() + "\n```\n"
+                "This is a starting point, not a finished ledger: a key "
+                "containing '__' (e.g. `revenue__financial-analyst`) is a "
+                "CONFLICT the normalizer could not resolve — two analysts "
+                "defined it differently. Pick ONE authoritative value per "
+                "conflict (prefer the more conservative / better-sourced), "
+                "fold it back under the single un-suffixed key, and carry "
+                "every other atom through unchanged into your own ```atoms "
+                "block below.",
+            )
+            if len(evidence_store_obj)
+            else ""
+        )
         # Minimal reconcile context: case + issue tree + analyst outputs.
         reconcile_context = (
             case
             + asked_section
             + _section("Issue tree", outputs["issue_tree"])
+            + evidence_section
             + analysis_detail
         )
 

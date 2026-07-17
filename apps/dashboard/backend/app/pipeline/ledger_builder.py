@@ -45,6 +45,7 @@ from app.pipeline.quantcheck import (
     _formula_ids,
     _FormulaError,
     _parse_formula,
+    dump_decimal_json,
 )
 
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -165,29 +166,7 @@ def _build_block(raw: str) -> tuple[str, list[str]]:
             return "", [err]
         entries.append(entry)
 
-    return _dump_entries(entries), []
-
-
-# Wrap each Decimal in a sentinel so json.dumps emits it as a quoted string, then
-# strip the quotes so the ledger carries a bare NUMBER — the verifier re-parses
-# with parse_float=Decimal and rejects a stringified value. The token is printable
-# ASCII (json does not escape it, unlike a NUL byte) and the unquote only fires on
-# sentinel-wrapped NUMERIC content, so it can never mangle a label. default() is
-# invoked only for Decimal objects, so nothing but a real value is ever wrapped.
-_DEC_SENTINEL = "@@DEC@@"
-_DEC_UNQUOTE = re.compile(
-    '"' + _DEC_SENTINEL + r"(-?[0-9][0-9.eE+\-]*)" + _DEC_SENTINEL + '"'
-)
-
-
-def _dump_entries(entries: list[dict[str, object]]) -> str:
-    def _default(o: object) -> object:
-        if isinstance(o, Decimal):
-            return f"{_DEC_SENTINEL}{o}{_DEC_SENTINEL}"
-        raise TypeError(f"not serializable: {type(o).__name__}")
-
-    text = json.dumps(entries, indent=1, default=_default)
-    return _DEC_UNQUOTE.sub(lambda m: m.group(1), text)
+    return dump_decimal_json(entries), []
 
 
 def _parse_atoms(data: list[object]) -> tuple[list[_Atom], list[str]]:
