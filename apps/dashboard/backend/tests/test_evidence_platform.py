@@ -264,6 +264,32 @@ def test_dedupe_collapses_identical_and_flags_conflicts():
     assert warnings_ and "conflict on 'x'" in warnings_[0]
 
 
+def test_dedupe_flags_conflict_for_same_value_different_scope():
+    """Regression for a real bug an external Codex review found (2026-07-17):
+    the fingerprint used to compare only (id, type, unit, value, formula) — a
+    same-value atom under a DIFFERENT time scope ("annual" vs
+    "cumulative_3yr") looked identical and was silently collapsed, hiding a
+    genuine semantic disagreement from the Engagement Manager."""
+    annual = _atom(scope="annual")
+    cumulative = _atom(scope="cumulative_3yr", created_by="ma")
+    out, warnings_ = en.dedupe([annual, cumulative])
+    assert len(out) == 2
+    assert warnings_ and "conflict on 'x'" in warnings_[0]
+
+
+def test_dedupe_flags_conflict_for_same_value_different_band():
+    """Same regression, for the low/high band instead of scope: two
+    assumptions with an identical value but a different plausibility band
+    must not be silently collapsed onto whichever arrived first."""
+    wide = _atom(type="assumption", low=Decimal("0.1"), high=Decimal("0.3"))
+    tight = _atom(
+        type="assumption", low=Decimal("0.19"), high=Decimal("0.21"), created_by="ma"
+    )
+    out, warnings_ = en.dedupe([wide, tight])
+    assert len(out) == 2
+    assert warnings_ and "conflict on 'x'" in warnings_[0]
+
+
 def test_normalize_end_to_end_order_matters():
     """Two analysts write the SAME concept under different ids AND different
     spellings of the same currency unit ('$M' vs 'USD_M') — normalization

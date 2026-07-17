@@ -109,30 +109,64 @@ something else checks it.
   or API quota (`Requirements` above) — a cap hit degrades to "use Claude for
   now," not a project outage.
 
-## Validation status (honest, as of 2026-07-17)
+## Validation status (real, as of 2026-07-17)
 
 Installation and configuration are verified (`claude plugin list` shows
-`codex@openai-codex`, enabled, version 1.0.6). **Live task validation — actually
-running `/codex:review`, `/codex:rescue`, etc. against this repo and measuring
-quality/speed/correctness — has NOT been performed yet.** It requires
-`/codex:setup` + login, which is the user's step by design (Claude never
-handles OpenAI credentials). This is stated plainly rather than assumed:
-until a real run happens, "Codex works well for X" is a documented
-expectation, not a proven result.
+`codex@openai-codex`, enabled, version 1.0.6). The user completed `/codex:setup`
+and authentication (`codex login` → ChatGPT) independently — Claude never
+touched credentials at any point.
 
-## Recommendation (preliminary — pending live validation above)
+**Live validation actually happened**, via the underlying `codex review` CLI
+directly (the plugin's own `/codex:review` skill wasn't loaded into the
+agent's session without a restart, so the same non-interactive command the
+skill wraps was invoked directly — same review, same model, same result):
 
-**Optional, task-scoped — not mandatory.** Reasoning:
+```
+codex review --base ee3c8e8 --title "ADR-010 P1-P3.5: ..."
+```
 
-- Nothing about StratAgent's architecture or quality bar depends on Codex
-  existing; making it mandatory would add an external dependency (OpenAI
-  auth, npm global install, a second vendor's uptime) to a workflow that
-  currently has none.
-- Its highest-confidence value (per the table above) is bounded to
-  mechanical/boilerplate/independent-review work — real value, but not
-  central to what makes engagements correct (that's ADR-009/010's
-  deterministic gates, which stay Claude/code-only by design).
-- A firmer recommendation (mandatory for a specific task class, e.g. "every
-  PR gets a `/codex:adversarial-review` before merge") is reasonable to revisit
-  once real usage data exists — this document should be updated with actual
-  measurements at that point, not left as a permanent "preliminary" note.
+Reviewed the full P1→P3.5 diff (`ee3c8e8..HEAD`, four commits, ~10 new
+modules). **Result: 3 findings, all 3 confirmed real by independent
+reproduction before any fix, all 3 fixed the same session:**
+
+1. `ledger_builder.py` extracted the *first* ```atoms block instead of the
+   last — meaning every quant-gate rework (whose prompt quotes the stale
+   previous reconciliation before the correction) was silently rebuilding the
+   ledger from **pre-correction values**. The single highest-severity finding
+   Codex could have made against this codebase.
+2. `ledger_builder.py`'s duplicate-atom conflict check omitted
+   `low`/`high`/`anchor`/`bridge` — a tighter or corrected assumption band
+   could be silently dropped in favor of a looser earlier one.
+3. `evidence_normalizer.py`'s dedup fingerprint omitted `scope`/`low`/`high` —
+   the same class of silent-collapse bug, one layer up the pipeline.
+
+Each was reproduced with a standalone script *before* being trusted, then
+fixed, then re-verified with the same script, then locked in as a permanent
+regression test (`test_last_atoms_block_wins_over_a_quoted_stale_one` and
+siblings in `test_ledger_builder.py`/`test_evidence_platform.py`). Zero false
+positives in this run — all three flagged issues were real.
+
+## Recommendation (updated with the result above)
+
+**Task-scoped and strongly encouraged for anything touching P1–P3's
+deterministic modules — not blanket-mandatory for every change.** Reasoning:
+
+- The one real data point available is a strong signal in Codex's favor: a
+  single adversarial-style review of dense, already-tested (205 passing
+  tests), self-reviewed code found three genuine correctness bugs — including
+  one that silently undermined the exact "no LLM invents the ledger"
+  guarantee this whole ADR series exists to provide. That's a concrete,
+  falsifiable result, not the generic "code review is good" prior.
+- It does not change the "not mandatory" stance on infrastructure grounds:
+  nothing about StratAgent's architecture depends on Codex existing, and it
+  draws on the user's own OpenAI usage/quota, so gating every commit on it
+  isn't free.
+- What it DOES change: this document no longer says "optional, unproven" —
+  it says "optional, and the one time it was tried, it caught something a
+  human + Claude + 205 tests missed." A reasonable house rule going forward:
+  run `/codex:adversarial-review` (or the direct `codex review --base <ref>`
+  equivalent) before considering any change to `ledger_builder.py`,
+  `quantcheck.py`, `evidence_normalizer.py`, `evidence_store.py`, or the
+  consulting-intelligence modules complete — precisely the code where a
+  silent correctness bug is most consequential and least likely to be
+  self-caught, which this run just demonstrated directly.

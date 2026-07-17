@@ -483,27 +483,41 @@ task; nothing in this repo's test suite, CI, or product depends on Codex
 being present. A bad Codex-delegated result is treated like a bad PR from a
 contractor — reviewed, revised, or discarded, never auto-merged.
 
-### Validation status — honest, not assumed (Task 9)
+### Validation status — real, not assumed (Task 9)
 
 **Installation is verified** (`claude plugin list` confirms `codex@openai-codex`
-enabled, v1.0.6). **Live task validation is NOT yet performed.** Running
-`/codex:review`/`/codex:rescue` against this repo and measuring quality,
-speed, correctness, and developer experience requires the user to complete
-`/codex:setup` and authenticate first — that step was explicitly left to the
-user (Claude does not handle OpenAI credentials), so it has not happened as
-of this writing. Claiming validated results without having run a single real
-task would be exactly the kind of fabricated confidence this entire ADR
-series exists to prevent in the product; the same discipline applies to
-documenting the tooling that builds it.
+enabled, v1.0.6). **Live validation happened.** The user completed
+`/codex:setup` and authentication independently; a real review then ran
+(`codex review --base ee3c8e8`, the underlying CLI the `/codex:review` skill
+wraps) against the full P1→P3.5 diff — four commits, ten new modules, 205
+already-passing tests.
 
-### Recommendation (Task 10 — preliminary, pending the validation above)
+**Result: 3 findings, all 3 real, all 3 fixed the same session.** Most
+notably: `ledger_builder.py` was extracting the *first* ```atoms block in a
+reconciliation instead of the last, which — because the engine's rework
+prompt quotes the stale previous reconciliation ahead of the correction —
+meant every quant-gate-triggered rework was silently rebuilding the ledger
+from **pre-correction values**. Two related silent-collapse bugs in the
+duplicate-atom/dedup comparisons (in `ledger_builder.py` and
+`evidence_normalizer.py`) were found the same way. Each was independently
+reproduced with a standalone script before being trusted — this ADR does not
+take an LLM's review claims on faith any more than it takes an LLM's
+arithmetic on faith — then fixed, then locked in as permanent regression
+tests. Zero false positives in this run. Full detail:
+[`Codex-Workflow.md`](../operations/Codex-Workflow.md).
 
-**Optional, task-scoped — not mandatory.** No architectural or quality-bar
-dependency on Codex exists today; the highest-confidence value (mechanical
-refactors, independent review) is real but not central to engagement
-correctness, which remains Claude/deterministic-code-only by design. Revisit
-once live usage data exists — `Codex-Workflow.md` is the place that record
-should land, not a permanent "preliminary" note left unresolved.
+### Recommendation (Task 10 — updated with the result above)
+
+**Task-scoped and strongly encouraged for P1–P3's deterministic modules —
+still not blanket-mandatory.** The one real data point is a strong signal:
+a single review caught a bug that silently undermined this ADR's own "no LLM
+invents the ledger" guarantee, in code that had already passed 205 tests and
+a human+Claude review. That upgrades the recommendation from "optional,
+unproven" to "optional, and worth running before considering a change to the
+Quant Gate / Ledger Builder / Evidence Store / consulting-intelligence
+modules complete" — not to "mandatory for everything," since no
+infrastructural dependency on Codex exists and it draws on the user's own
+OpenAI quota.
 
 ## 7. What I am asking to decide
 

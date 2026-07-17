@@ -170,6 +170,41 @@ def test_identical_duplicate_key_collapses():
     assert len(_entries(result.markdown)) == 1
 
 
+def test_duplicate_key_with_different_band_is_a_conflict_not_silently_dropped():
+    """Regression for a real bug an external Codex review found (2026-07-17):
+    two atoms with the same key/value but a DIFFERENT low/high band were
+    treated as identical, so the second (possibly tighter, more correct) band
+    was silently discarded instead of being flagged as a conflict."""
+    wide = (
+        '{"key":"share","kind":"assumption","label":"Share","value":0.2,'
+        '"unit":"RATIO","source":"s","low":0.1,"high":0.3}'
+    )
+    tight = wide.replace('"low":0.1,"high":0.3', '"low":0.19,"high":0.21')
+    result = lb.build_from_markdown(_atoms(wide, tight))
+    assert any("declared twice" in e for e in result.errors)
+
+
+def test_last_atoms_block_wins_over_a_quoted_stale_one():
+    """Regression for a real bug an external Codex review found and a
+    reproduction confirmed (2026-07-17): engine.py's rework prompt quotes
+    "Your previous canonical reconciliation" (including its stale ```atoms
+    block) BEFORE asking for the correction. A first-match extraction was
+    silently rebuilding the ledger from the OLD, pre-correction values on
+    every rework — the exact scenario this test reproduces directly."""
+    stale = REVENUE.replace('"value":324', '"value":100')
+    corrected = REVENUE  # value:324
+    md = (
+        "Your previous canonical reconciliation:\n"
+        + _atoms(stale)
+        + "\n\nCorrected:\n"
+        + _atoms(corrected)
+    )
+    result = lb.build_from_markdown(md)
+    assert result.errors == ()
+    entries = _entries(result.markdown)
+    assert entries["A1"]["value"] == 324
+
+
 def test_cycle_is_detected():
     a = '{"key":"a","kind":"derived","label":"a","unit":"X","expr":"b + 1"}'
     b = '{"key":"b","kind":"derived","label":"b","unit":"X","expr":"a + 1"}'

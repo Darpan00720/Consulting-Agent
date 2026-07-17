@@ -210,7 +210,28 @@ def resolve_aliases(
 
 
 def _fingerprint(atom: EvidenceAtom) -> tuple[object, ...]:
-    return (atom.atom_id, atom.type, atom.unit, atom.value, atom.formula)
+    """Everything that makes an atom's DEFINITION distinct, not just its id
+    and headline value.
+
+    Real bug, found by an external Codex review and confirmed by
+    reproduction before fixing: the original fingerprint omitted ``scope``
+    and the ``low``/``high`` band, so two atoms with the same id and value
+    but a DIFFERENT time scope (e.g. "annual" vs "cumulative_3yr") or a
+    different plausibility band were treated as identical duplicates —
+    ``dedupe()`` silently collapsed them onto whichever arrived first instead
+    of surfacing a genuine semantic conflict for the Engagement Manager to
+    resolve.
+    """
+    return (
+        atom.atom_id,
+        atom.type,
+        atom.unit,
+        atom.scope,
+        atom.value,
+        atom.formula,
+        atom.low,
+        atom.high,
+    )
 
 
 def dedupe(atoms: list[EvidenceAtom]) -> tuple[list[EvidenceAtom], list[str]]:

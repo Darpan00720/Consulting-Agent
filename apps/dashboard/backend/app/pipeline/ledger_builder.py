@@ -93,12 +93,21 @@ def build_from_markdown(reconciliation: str) -> BuildResult:
     No atoms block → pass-through (``had_atoms=False``, no errors). Malformed
     atoms → ``errors`` for the rework loop and the original text unchanged so the
     caller can re-dispatch. Success → the text with a correct ``quant`` block.
+
+    Uses the LAST ``atoms`` block, not the first (real bug, found by an
+    external Codex review and confirmed by reproduction before fixing): the
+    engine's rework prompt literally quotes "Your previous canonical
+    reconciliation" — including its stale ```atoms block — ahead of asking
+    for the correction, so a naive first-match extraction silently rebuilds
+    the ledger from the OLD, pre-correction values on every rework. Mirrors
+    quantcheck.extract_block's existing "last block wins" discipline, which
+    this module should have replicated from the start.
     """
-    match = _ATOMS_BLOCK_RE.search(reconciliation)
-    if match is None:
+    blocks = _ATOMS_BLOCK_RE.findall(reconciliation)
+    if not blocks:
         return BuildResult(reconciliation, (), had_atoms=False)
 
-    block, errors = _build_block(match.group(1))
+    block, errors = _build_block(blocks[-1])
     if errors:
         return BuildResult(reconciliation, tuple(errors), had_atoms=True)
 
@@ -252,12 +261,35 @@ def _validate_atom(atom: _Atom) -> str | None:
 
 
 def _atoms_conflict(a: _Atom, b: _Atom) -> bool:
-    return (a.kind, a.unit, a.scope, a.value, a.expr) != (
+    """True if two same-key atoms differ in ANY ledger-affecting field.
+
+    Real bug, found by an external Codex review and confirmed by
+    reproduction before fixing: the original comparison omitted
+    low/high/anchor/bridge, so two declarations with the same value but a
+    DIFFERENT plausibility band (or anchor/bridge flag) were treated as
+    identical — the second, possibly tighter or more correct declaration was
+    silently dropped instead of being surfaced as a conflict.
+    """
+    return (
+        a.kind,
+        a.unit,
+        a.scope,
+        a.value,
+        a.expr,
+        a.low,
+        a.high,
+        a.anchor,
+        a.bridge,
+    ) != (
         b.kind,
         b.unit,
         b.scope,
         b.value,
         b.expr,
+        b.low,
+        b.high,
+        b.anchor,
+        b.bridge,
     )
 
 
