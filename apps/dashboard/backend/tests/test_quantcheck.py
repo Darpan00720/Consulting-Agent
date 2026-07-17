@@ -508,8 +508,11 @@ def test_tie_out_fails_closed_and_flags_the_report(tmp_path, monkeypatch):
     _drain(run_engagement(eid, CASE, call=fake_call))
 
     engagement = db.get_engagement(eid)
-    assert "QUANT GATE — NOT REVIEW-READY" in engagement["report_md"]
-    assert "21.06" in engagement["report_md"]  # named, not hidden
+    md = engagement["report_md"]
+    assert "NOT BOARD-READY — INTERIM STATUS ONLY" in md
+    assert "quant-gate=FAILED" in md  # governance line can't read all-clear
+    assert "PROVISIONAL" in md  # recommendations demoted, not final
+    assert "21.06" in md  # the orphan is named, not hidden
     completed = next(
         e for e in db.list_events(eid) if e["type"] == "engagement_completed"
     )
@@ -545,16 +548,55 @@ def test_missing_ledger_gets_banner_even_if_report_writer_ignores_it(
     _drain(run_engagement(eid, CASE, call=fake_call))
 
     engagement = db.get_engagement(eid)
-    assert "QUANT GATE — NOT REVIEW-READY" in engagement["report_md"]
-    assert "no ```quant ledger block found" in engagement["report_md"]
+    md = engagement["report_md"]
+    assert "NOT BOARD-READY — INTERIM STATUS ONLY" in md
+    assert "no ```quant ledger block found" in md
+    # The MediCore live-run bug (2026-07-17): a failed-gate report still read as
+    # a final Board decision. The banner must deterministically state the true
+    # governance line (quant gate included) and demote the body to provisional.
+    assert "quant-gate=FAILED" in md
+    assert "PROVISIONAL" in md
     # the model's actual content is still there, just flagged, not discarded
-    assert "€12M in value" in engagement["report_md"]
+    assert "€12M in value" in md
     completed = next(
         e for e in db.list_events(eid) if e["type"] == "engagement_completed"
     )
     assert completed["payload"]["review_ready"] is False
     tie_events = [e for e in db.list_events(eid) if e["type"] == "quant_tie_out"]
     assert tie_events[-1]["payload"]["passed"] is False
+    db.reset_for_tests()
+
+
+def test_interim_banner_caps_a_long_defect_list(tmp_path, monkeypatch):
+    """A ledger that fails on many rows must not bury the report under a wall of
+    near-identical lines — the banner caps the list and summarizes the rest."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "cap_defects.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 0)
+    db.reset_for_tests()
+
+    # A ledger with 15 unsourced assumptions → 15 schema defects, all similar.
+    entries = ",".join(
+        f'{{"id":"A{i}","kind":"assumption","label":"x{i}","value":1,'
+        f'"unit":"RATIO"}}'
+        for i in range(15)
+    )
+    bad_ledger = "reconciliation\n\n```quant\n[" + entries + "]\n```\n"
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return bad_ledger
+        if agent == "report-writer":
+            return "## Executive summary\n\nDo the thing."
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    md = db.get_engagement(eid)["report_md"]
+    assert "NOT BOARD-READY" in md
+    assert "and " in md and "more deterministic defect" in md  # cap summary line
+    # only the first 8 defect bullets are shown, not all 15
+    assert md.count("> - ") <= 9  # 8 defects + possibly the summary bullet
     db.reset_for_tests()
 
 

@@ -998,13 +998,22 @@ async def _run_engagement(
             + _section("Reviewer notes", review)
             + _section("Challenger notes", challenge)
             + f"\n\nGovernance state: reviewer={review_verdict},"
-            + f" challenger={challenge_verdict}. "
+            + f" challenger={challenge_verdict},"
+            + f" quant-gate={'verified' if quant.passed else 'FAILED'}. "
             + (
-                "Both gates cleared — write the final executive-ready client report."
+                "All gates cleared — write the final executive-ready client report."
                 if review_ready
-                else "The gates did not fully clear after rework — write an honest"
-                " interim status report that states plainly it is not a final"
-                " recommendation and lists exactly what must be reconciled next."
+                else "THE GATES DID NOT CLEAR. Write an INTERIM status memo, not a "
+                "decision document. Rules you MUST follow because the numbers are "
+                "not verified: (1) do NOT present a final recommendation — frame "
+                "the strongest option as 'the leading candidate, PROVISIONAL "
+                "pending reconciliation' and say what must be resolved before it "
+                "can be acted on; (2) do NOT write a 'decision required by <date>' "
+                "line or any language that invites the Board to act now; (3) the "
+                "meta line's Governance field MUST read "
+                f"'reviewer={review_verdict} · challenger={challenge_verdict} · "
+                "quant-gate=FAILED — INTERIM' — never show an all-clear governance "
+                "line when a gate failed."
             )
             + "\n\nUse the CANONICAL RECONCILIATION as the single source of truth"
             " for every number and every assumption ID — never cite a figure from"
@@ -1028,7 +1037,8 @@ async def _run_engagement(
             f"- Start with an H1 title, then a meta line `**Prepared for:** the "
             f"board · **Date:** {_today()} · **Governance:**"
             f" reviewer={review_verdict} · "
-            f"challenger={challenge_verdict}`.\n"
+            f"challenger={challenge_verdict} · "
+            f"quant-gate={'verified' if quant.passed else 'FAILED — INTERIM'}`.\n"
             "- Lead with the answer (Pyramid Principle): the very first section is a "
             "`## Executive summary` whose first sentence is the single recommendation "
             "in one line, then the 2-3 reasons and the single biggest caveat.\n"
@@ -1146,11 +1156,31 @@ async def _run_engagement(
         )
         if unresolved:
             review_ready = False
+            # Cap the defect list so a ledger that failed on dozens of rows
+            # doesn't bury the report under a wall of near-identical lines.
+            shown = unresolved[:8]
+            more = len(unresolved) - len(shown)
+            defect_lines = "\n".join(f"> - {d.message}" for d in shown) + (
+                f"\n> - …and {more} more deterministic defect(s)." if more else ""
+            )
+            # This banner is the guaranteed-correct governance signal: it does
+            # NOT depend on the report-writer having obeyed the interim
+            # instruction. It states the true governance line (quant gate
+            # included, so it can't read all-clear like the model's own meta
+            # line might) AND explicitly demotes every recommendation below to
+            # provisional — closing the "banner says not-ready, body says
+            # 'Decision required by …'" contradiction a real run exposed.
             report = (
-                "> **⚠ QUANT GATE — NOT REVIEW-READY.** The figures in this "
-                "report have NOT been machine-verified and must not be relied "
-                "on. Deterministic defects:\n>\n"
-                + "\n".join(f"> - {d.message}" for d in unresolved)
+                "> **⚠ NOT BOARD-READY — INTERIM STATUS ONLY.**\n>\n"
+                f"> **Governance:** reviewer={review_verdict} · "
+                f"challenger={challenge_verdict} · "
+                "**quant-gate=FAILED** → overall **NOT REVIEW-READY**.\n>\n"
+                "> The figures below have NOT been machine-verified. **Treat "
+                "every recommendation, euro figure, and “decision required "
+                "by” date in this report as PROVISIONAL** — the current "
+                "leading option pending reconciliation, **not** a decision the "
+                "Board should act on. Deterministic defects still open:\n>\n"
+                + defect_lines
                 + "\n\n"
                 + report
             )
