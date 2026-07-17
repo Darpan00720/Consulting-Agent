@@ -24,7 +24,7 @@ from typing import Any
 from app import config, db
 from app import telemetry_bridge as telemetry
 from app.events import bus
-from app.pipeline import prompts, quantcheck
+from app.pipeline import ledger_builder, prompts, quantcheck
 from app.pipeline.claude import call_agent, friendly_error
 from app.pipeline.providers import AllProvidersRateLimitedError
 
@@ -212,42 +212,49 @@ never silently drop it.
 A bullet list of every collision or contradiction you resolved (ID reused,
 number in dispute, citation to a stale value) and how you resolved it.
 
-## Quant ledger
-The LAST thing in your output: a fenced code block opened with ```quant
-containing ONE JSON array — the machine-verified factbase (ADR-009). A
-deterministic verifier re-evaluates every formula in exact decimal arithmetic;
-any mismatch, missing field, or missing block BLOCKS the engagement, so this
-section is not optional and not prose. Every number cited anywhere above
-(reconciled key figures, options comparison, question closures) must appear as
-an entry here.
+## Evidence atoms
+The LAST thing in your output: a fenced code block opened with ```atoms
+containing ONE JSON array of EVIDENCE ATOMS (ADR-010). You do NOT write the
+ledger, mint ids, wire formula references, or compute any derived value —
+deterministic code does all of that from your atoms and a verifier then checks
+it. Your job is only to supply the evidence: the facts, the assumptions with
+their bands, and the SHAPE of each calculation. Every number cited anywhere
+above (reconciled key figures, options comparison, question closures) must trace
+to an atom here.
 
-Entry schema (one JSON object per number):
-  {"id":"D4","kind":"derived","label":"Delivery commission drain",
-   "value":19.44,"unit":"EUR_M","basis":"annual","formula":"F1 * A8 * A9"}
+An atom references OTHER atoms by their ``key`` (a slug you choose), never by an
+id — ids do not exist yet. Three kinds:
 
-Rules the verifier enforces:
-- kind is "fact" (client-stated; "source" quotes the case text), "assumption"
-  ("source" names where the number would come from — POS, CRM, financials,
-  contract, benchmark — plus a plausibility band "low"/"high" containing
-  "value"), or "derived" ("formula" over other ledger ids using only
-  + - * / ** and parentheses; a derived entry with no formula is invalid).
-- Rates used in any formula are stored as RATIO (0.05 = 5%), never PCT.
-- State values at FULL precision of the computation — never round inside the
-  ledger (the report rounds for prose). A value that does not equal its own
-  formula is a defect.
-- "basis" is the time scope: "annual", "cumulative_3yr", "per_store", etc.
-  Never add terms with different units or mixed scopes in one formula.
-- For any profitability / cost-change case, include a BRIDGE: the
-  period-over-period EBITDA (or cost) change decomposed into named derived
-  components — volume/revenue scaling (base-period cost ratio times the
-  revenue change), price/inflation, mix, one-offs — and a total entry with
-  "bridge": true whose formula is the pure +/- sum of those component ids.
-  The unexplained residual is itself a derived entry (computed, never
-  asserted).
-- Where a derived figure has an independent factual counterpart (e.g. a
-  market share implied by SOM vs the company's actual revenue over the same
-  market size), set "anchor": "<id>" on the derived entry so the verifier
-  cross-checks them — this is how self-contradictions are caught.
+  {"key":"revenue","kind":"fact","label":"Annual revenue","value":324,
+   "unit":"EUR_M","scope":"annual","source":"client_fact: '€324M revenue'"}
+
+  {"key":"delivery_share","kind":"assumption","label":"Delivery share of sales",
+   "value":0.20,"unit":"RATIO","scope":"annual","source":"analyst_estimate",
+   "low":0.10,"high":0.25}
+
+  {"key":"drain","kind":"derived","label":"Delivery commission drain",
+   "unit":"EUR_M","scope":"annual",
+   "expr":"revenue * delivery_share * commission"}
+
+Rules (the builder + verifier enforce these):
+- A ``fact`` is client-stated: give ``value`` and a ``source`` quoting the case.
+- An ``assumption`` needs ``value``, a ``source`` naming where the number would
+  come from (POS, CRM, financials, contract, benchmark), and a plausibility band
+  ``low``/``high`` that contains ``value``.
+- A ``derived`` atom gives ONLY an ``expr`` over other atom keys, using
+  + - * / ** and parentheses. DO NOT give it a ``value`` — the code computes it
+  exactly, so you cannot get the arithmetic wrong (and must not try).
+- Rates are RATIO (0.05 = 5%), never PCT. Never mix units or time scopes in one
+  ``expr`` (annual + cumulative is a defect).
+- For any profitability / cost-change case, include a BRIDGE: derived atoms for
+  each component of the period-over-period change — volume/revenue scaling
+  (base-period cost ratio × the revenue change), price/inflation, mix, one-offs
+  — plus a total derived atom with ``"bridge": true`` whose ``expr`` is the pure
+  +/- sum of those component keys. The unexplained residual is itself a derived
+  atom.
+- Where a derived figure has an independent factual counterpart (e.g. market
+  share implied by SOM vs the company's actual revenue over the same market
+  size), set ``"anchor":"<key>"`` on it so the verifier cross-checks them.
 
 Rules:
 - Do NOT change any conclusion or recommendation — only harmonize IDs, numbers,
@@ -730,11 +737,27 @@ async def _run_engagement(
         # reviewer-driven rework that breaks the ledger can still be repaired.
         quant_fixes_left = config.MAX_REWORK + 1
 
+        def _build_and_verify(
+            canonical: str,
+        ) -> tuple[str, quantcheck.QuantReport]:
+            # ADR-010 P1: assemble the ledger from the EM's evidence ATOMS
+            # deterministically (code mints ids, wires formulas, and computes
+            # every derived value), THEN run the verifier. A builder failure
+            # (malformed atoms) is surfaced as a QuantReport so it flows through
+            # the exact same rework loop, emit, and telemetry as a gate defect.
+            built = ledger_builder.build_from_markdown(canonical)
+            if built.errors:
+                defects = tuple(
+                    quantcheck.QuantDefect("atoms", (), msg) for msg in built.errors
+                )
+                return canonical, quantcheck.QuantReport(False, defects, None)
+            return built.markdown, quantcheck.verify_ledger(built.markdown)
+
         async def quant_verified(
             canonical: str,
         ) -> tuple[str, quantcheck.QuantReport]:
             nonlocal quant_fixes_left
-            verdict = quantcheck.verify_ledger(canonical)
+            canonical, verdict = _build_and_verify(canonical)
             while not verdict.passed and quant_fixes_left > 0:
                 quant_fixes_left -= 1
                 await _emit(
@@ -752,22 +775,23 @@ async def _run_engagement(
                     reconcile_context
                     + _section("Your previous canonical reconciliation", canonical)
                     + _section(
-                        "QUANT GATE DEFECTS — deterministic verifier output. "
-                        "These are exact; every one must be fixed",
+                        "QUANT GATE DEFECTS — deterministic output. These are "
+                        "exact; every one must be fixed",
                         quantcheck.format_defects(verdict),
                     )
                     + "\n\nRe-issue the FULL canonical reconciliation with a "
-                    "corrected ```quant ledger. Fix exactly what the defects "
-                    "name — correct the value or the formula, never adjust an "
-                    "unrelated number to force agreement. Conclusions and "
-                    "recommendations stay unchanged unless a corrected number "
+                    "corrected ```atoms block. Fix exactly what the defects "
+                    "name — correct the atom's value, band, unit, source, or "
+                    "expr. Remember: you supply evidence atoms only; the code "
+                    "computes derived values, so never put a value on a derived "
+                    "atom. Conclusions stay unchanged unless a corrected number "
                     "genuinely invalidates them, in which case say so in "
                     "Corrections applied.",
                     system_override=ENGAGEMENT_MANAGER_SYSTEM,
                     checkpoint=False,
                     max_tokens=6000,
                 )
-                verdict = quantcheck.verify_ledger(canonical)
+                canonical, verdict = _build_and_verify(canonical)
             await _emit(
                 engagement_id,
                 "quant_gate",
@@ -909,8 +933,9 @@ async def _run_engagement(
                 + _section("Your previous canonical reconciliation", canonical)
                 + _section("Reviewer's required fixes — resolve every one", review)
                 + "\n\nProduce a corrected canonical reconciliation that fixes every "
-                "issue the reviewer raised. Keep the ```quant ledger valid: every "
-                "figure you change must change in the ledger too, with its formula.",
+                "issue the reviewer raised. Keep the ```atoms block in sync: every "
+                "figure you change must change in its atom too (value for a fact/"
+                "assumption, expr for a derived one).",
                 system_override=ENGAGEMENT_MANAGER_SYSTEM,
                 checkpoint=False,
                 max_tokens=6000,

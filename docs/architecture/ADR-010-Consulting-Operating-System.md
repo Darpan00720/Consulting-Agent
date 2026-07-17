@@ -108,7 +108,7 @@ G1 closes the loop on the other side (no number in the ledger the LLM authored).
 
 | Phase | Deliverable | Fixes | Risk |
 |---|---|---|---|
-| **P1** | **Deterministic Ledger Builder (G1).** Analysts/EM emit evidence atoms in a strict JSON schema; a new `ledger_builder.py` assembles + reconciles + wires formulas; the EM no longer authors the ```quant block. | The 7/7 failure | Medium — changes EM + analyst contracts |
+| **P1** ✅ | **Deterministic Ledger Builder (G1).** DONE (2026-07-17). `ledger_builder.py`: EM emits a ```atoms block; code mints ids, translates key-refs→id-formulas, **computes every derived value** (LLM value ignored), emits the ```quant block the gate verifies. Wired into `quant_verified`; builder errors feed the existing rework loop; backward compatible (no atoms block → pass-through). 16 tests. | The 7/7 failure | Medium — changes EM + analyst contracts |
 | **P2** | **Structured analyst output (G2).** Analysts emit `AnalysisBlock` JSON; markdown is rendered from it. | Traceability, provenance | Medium |
 | **P3** | **Unify onto the core.** Live pipeline builds a real `EngagementState` (state/evidence/governance packages) instead of passing markdown; retires the dashboard's parallel logic. Resolves ADR-008. | Duplication, drift | High — largest migration |
 | **P4** | **Business-Plausibility Engine (G3).** | Unrealistic recommendations | Low |

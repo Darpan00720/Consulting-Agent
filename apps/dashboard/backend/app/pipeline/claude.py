@@ -105,23 +105,24 @@ def _mock_output(agent_name: str) -> str:
         return "Verdict: approved — demo run, all checks pass against the ledger."
     if agent_name == "challenger":
         return "Verdict: stands_with_caveats — demo run, recommendation holds."
-    # The quant gate (ADR-009) fails closed on a missing/invalid ledger, so the
-    # canned reconciliation must carry a small VALID one — mock mode should
-    # demonstrate the success path, and this doubles as living documentation of
-    # the ledger format.
+    # The quant gate fails closed on a missing/invalid ledger, so the canned
+    # reconciliation must carry a small VALID one. Under ADR-010 the EM emits
+    # evidence ATOMS (code builds the ledger), so mock mode does too — it
+    # demonstrates the success path and doubles as living documentation of the
+    # atom format.
     if agent_name == "engagement-manager":
         return (
             "## Canonical reconciliation (demo output)\n\n"
             "**This was a demo run** — canned reconciliation from mock mode.\n\n"
-            "```quant\n"
+            "```atoms\n"
             "[\n"
-            ' {"id":"F1","kind":"fact","label":"Revenue","value":800,'
-            '"unit":"USD_M","basis":"annual","source":"case prompt"},\n'
-            ' {"id":"A1","kind":"assumption","label":"Margin uplift",'
-            '"value":0.01,"unit":"RATIO","basis":"annual",'
+            ' {"key":"revenue","kind":"fact","label":"Revenue","value":800,'
+            '"unit":"USD_M","scope":"annual","source":"case prompt"},\n'
+            ' {"key":"margin_uplift","kind":"assumption","label":"Margin uplift",'
+            '"value":0.01,"unit":"RATIO","scope":"annual",'
             '"source":"benchmark: demo","low":0.005,"high":0.02},\n'
-            ' {"id":"D1","kind":"derived","label":"EBITDA uplift","value":8,'
-            '"unit":"USD_M","basis":"annual","formula":"F1 * A1"}\n'
+            ' {"key":"ebitda_uplift","kind":"derived","label":"EBITDA uplift",'
+            '"unit":"USD_M","scope":"annual","expr":"revenue * margin_uplift"}\n'
             "]\n"
             "```\n"
         )
