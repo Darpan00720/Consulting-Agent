@@ -1,7 +1,7 @@
 ---
 adr: 010
 title: StratAgent as a Consulting Operating System — unify, don't rebuild
-status: Accepted (P1 + P2 implemented 2026-07-17)
+status: Accepted (P1 + P2 + P3 implemented 2026-07-17; P3.5 dev-workflow tooling added 2026-07-17)
 date: 2026-07-17
 deciders: [Principal Architect]
 relates: [ADR-008 Repository Topology, ADR-009 Deterministic Quant Gate, v2.0 Spec]
@@ -420,6 +420,90 @@ recommendations."
 - Rewiring the five agent prompts to emit these contracts (the flagged gap
   above) can happen incrementally, one agent at a time, each independently
   testable — the same pattern P1/P2 already established.
+
+## 6c. Phase 3.5 — Development Workflow Modernization (Codex plugin, 2026-07-17)
+
+A deliberate scope note before anything else: **this phase changes how the
+engineering team builds StratAgent. It does not touch StratAgent itself.**
+No product code (the dashboard, the agent prompts, the Quant Gate, the
+Evidence Store) calls out to Codex or depends on it existing. It is a
+developer-tooling addition, orthogonal to every other phase in this ADR.
+
+### What was integrated
+
+[`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) — an
+official OpenAI-published Claude Code plugin exposing `/codex:review`,
+`/codex:adversarial-review`, `/codex:rescue`, `/codex:transfer`,
+`/codex:status`/`/codex:result`/`/codex:cancel`. Verified before installation
+(not assumed from the name): real GitHub org, 29k stars, Apache-2.0, actively
+maintained. Installed at user scope via `claude plugin marketplace add` /
+`claude plugin install` (real, non-interactive CLI subcommands — not the
+chat-only `/plugin` slash command). Full operational detail, security
+posture, and the Claude-vs-Codex decision table live in
+[`docs/operations/Codex-Workflow.md`](../operations/Codex-Workflow.md) rather
+than duplicated here; this section is the architectural record of the
+decision.
+
+### Responsibilities (Task 6/7 of the phase brief)
+
+| Codex | Claude | Neither |
+|---|---|---|
+| Large mechanical refactors, boilerplate, test scaffolding, migrations, independent code review | Consulting-domain reasoning (agent prompts, framework/vault content, engagement lifecycle); anything touching the Quant Gate / Ledger Builder / Evidence Store / consulting-intelligence modules (P1–P3) | Business recommendations, quantitative validation — that's the *product's* job, not a dev tool's, under any circumstance |
+
+The P1–P3 carve-out is not incidental: those modules exist *specifically* so
+arithmetic and structure are never delegated to an LLM's unverified judgment.
+Delegating their implementation to a second LLM (Codex) without the same
+deterministic-verification discipline this whole ADR is built around would
+quietly reintroduce the exact risk P1/P2/P3 were built to remove. Codex output
+touching those files still goes through the same test suite and Quant Gate
+Claude's own changes do — no code path anywhere trusts an LLM's output (Claude's
+or Codex's) without deterministic verification.
+
+**Collaboration pattern:** Codex proposes, something else verifies — the same
+shape as every governance gate in this document. Default flow: Codex drafts
+(a patch, a review) → Claude or a human checks it against this project's
+actual conventions before it lands. No auto-merge path for Codex output.
+
+### Security (Task 1/8)
+
+Requires the user's own OpenAI authentication (API key or ChatGPT login) —
+**never entered or handled by Claude**, consistent with this session's
+standing rule against ever touching credentials. `/codex:review` and
+`/codex:adversarial-review` send this repo's code to OpenAI's Codex service;
+`/codex:transfer` sends actual Claude Code session transcripts. Both are
+real, acknowledged data-sharing events, not incidental — flagged to the user
+explicitly before installation (via `AskUserQuestion`, not assumed), and
+documented in `Codex-Workflow.md` so anyone touching this repo later sees the
+tradeoff before using those specific commands.
+
+### Failure modes & fallback (Task 8)
+
+Codex absent, unauthenticated, or rate-limited → fall back to Claude for the
+task; nothing in this repo's test suite, CI, or product depends on Codex
+being present. A bad Codex-delegated result is treated like a bad PR from a
+contractor — reviewed, revised, or discarded, never auto-merged.
+
+### Validation status — honest, not assumed (Task 9)
+
+**Installation is verified** (`claude plugin list` confirms `codex@openai-codex`
+enabled, v1.0.6). **Live task validation is NOT yet performed.** Running
+`/codex:review`/`/codex:rescue` against this repo and measuring quality,
+speed, correctness, and developer experience requires the user to complete
+`/codex:setup` and authenticate first — that step was explicitly left to the
+user (Claude does not handle OpenAI credentials), so it has not happened as
+of this writing. Claiming validated results without having run a single real
+task would be exactly the kind of fabricated confidence this entire ADR
+series exists to prevent in the product; the same discipline applies to
+documenting the tooling that builds it.
+
+### Recommendation (Task 10 — preliminary, pending the validation above)
+
+**Optional, task-scoped — not mandatory.** No architectural or quality-bar
+dependency on Codex exists today; the highest-confidence value (mechanical
+refactors, independent review) is real but not central to engagement
+correctness, which remains Claude/deterministic-code-only by design. Revisit
+once live usage data exists — `Codex-Workflow.md` is the place that record
+should land, not a permanent "preliminary" note left unresolved.
 
 ## 7. What I am asking to decide
 
