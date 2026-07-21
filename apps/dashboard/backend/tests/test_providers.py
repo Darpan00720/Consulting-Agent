@@ -22,8 +22,17 @@ _ALL_KEY_VARS = (
 )
 
 
+_OLLAMA_VARS = (
+    "OLLAMA_ENABLED",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_MODEL",
+    "OLLAMA_PLACEMENT",
+    "OLLAMA_API_KEY",
+)
+
+
 def _clear_keys(monkeypatch):
-    for var in _ALL_KEY_VARS:
+    for var in _ALL_KEY_VARS + _OLLAMA_VARS:
         monkeypatch.delenv(var, raising=False)
 
 
@@ -536,3 +545,55 @@ def test_vision_provider_attaches_images(monkeypatch):
     text_only = _provider("t")  # supports_vision defaults False
     asyncio.run(text_only.call("sys", "user text", 100, [img]))
     assert captured["messages"][1]["content"] == "user text"  # image dropped
+
+
+# ---- Ollama local provider (additive; opt-in) ---------------------------
+
+
+def test_ollama_absent_by_default(monkeypatch):
+    """A cloud-only setup must not gain a local provider unless opted in."""
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    names = [p.name for p in providers.build_chain()]
+    assert "ollama" not in names
+
+
+def test_ollama_appends_as_fallback_by_default_placement(monkeypatch):
+    """OLLAMA_ENABLED with no placement puts the local model LAST (fallback)."""
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("OLLAMA_ENABLED", "1")
+    names = [p.name for p in providers.build_chain()]
+    assert names[0] == "gemini" and names[-1] == "ollama"
+
+
+def test_ollama_first_placement_is_local_first(monkeypatch):
+    """OLLAMA_PLACEMENT=first puts the local model at the head (cost saver)."""
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("OLLAMA_ENABLED", "1")
+    monkeypatch.setenv("OLLAMA_PLACEMENT", "first")
+    names = [p.name for p in providers.build_chain()]
+    assert names[0] == "ollama"
+
+
+def test_ollama_only_chain_when_no_cloud_keys(monkeypatch):
+    """Local-only: Ollama enabled with no cloud keys still yields a usable chain."""
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("OLLAMA_ENABLED", "1")
+    chain = providers.build_chain()
+    assert [p.name for p in chain] == ["ollama"]
+
+
+def test_ollama_provider_config(monkeypatch):
+    """Local provider: no pacing, honours env overrides, reasoning headroom."""
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("OLLAMA_ENABLED", "1")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:4b")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    (ollama,) = providers.build_chain()
+    assert ollama.min_gap == 0.0  # local — no free-tier rate limit
+    assert ollama.base_url == "http://localhost:11434/v1"
+    # qwen3 is a reasoning model in the registry → gets thinking headroom so a
+    # tight budget isn't consumed by (invisible) thinking (finish_reason=length).
+    assert ollama.token_headroom == 2048

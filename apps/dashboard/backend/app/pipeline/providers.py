@@ -48,6 +48,17 @@ import openai
 log = logging.getLogger(__name__)
 
 
+def _model_spec(model: str) -> Any:
+    """Look up a model's capabilities in the registry (None if unregistered).
+
+    Imported lazily so ``providers`` has no import-time dependency on the
+    registry module and stays trivially testable in isolation.
+    """
+    from app.pipeline import registry
+
+    return registry.get_spec(model)
+
+
 def _env(name: str, default: str) -> str:
     """``os.environ.get`` that treats an empty value as absent.
 
@@ -106,6 +117,11 @@ ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/"  # OpenAI-compat endpoint
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 GITHUB_MODELS_BASE_URL = "https://models.github.ai/inference"
+# Ollama's OpenAI-compatible endpoint. Local, so no key and no rate limit; it
+# serves whatever model has been `ollama pull`ed. See docs/operations/
+# Ollama-Local-Runtime.md. Opt-in only (OLLAMA_ENABLED) so the cloud deployment,
+# which has no local daemon, never probes a dead localhost port.
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
 # Cloudflare's endpoint embeds the account id, so it is built per-account.
 CLOUDFLARE_BASE_URL_TEMPLATE = (
     "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
@@ -361,7 +377,59 @@ def build_chain() -> list[Provider]:
             )
         )
 
+    _place_ollama(chain)
     return chain
+
+
+def _ollama_provider() -> Provider | None:
+    """Build the local Ollama provider, or None when it isn't opted in.
+
+    Local model via Ollama's OpenAI-compatible endpoint. It reuses the exact
+    ``Provider`` abstraction — Ollama is just another OpenAI-shaped base_url —
+    so no new call path is introduced. Opt-in via ``OLLAMA_ENABLED=1`` because
+    the hosted deployment has no local daemon and must not probe a dead port.
+    Local inference has no per-minute quota, so ``min_gap`` is 0.
+    """
+    if _env("OLLAMA_ENABLED", "") != "1":
+        return None
+    model = _env("OLLAMA_MODEL", "qwen3:4b")
+    spec = _model_spec(model)
+    return Provider(
+        name="ollama",
+        base_url=_env("OLLAMA_BASE_URL", OLLAMA_BASE_URL),
+        # Ollama ignores the key, but the OpenAI SDK requires a non-empty one.
+        api_key=_env("OLLAMA_API_KEY", "ollama"),
+        model=model,
+        min_gap=0.0,  # local — no free-tier pacing
+        cooldown_429=30.0,  # only if the daemon is briefly unreachable
+        supports_vision=bool(spec and spec.supports_vision),
+        # Local reasoning models (Qwen3, DeepSeek-R1) spend tokens THINKING
+        # before the visible answer; Ollama's /v1 endpoint strips the think
+        # block from content but still bills it against max_tokens. Without
+        # headroom a tight budget is consumed entirely by (invisible) thinking
+        # and the reply comes back empty (finish_reason=length) — the same trap
+        # gemini-flash and cerebras carry token_headroom for. Verified: at a
+        # 120-token budget qwen3:4b returned empty; with headroom it answers.
+        token_headroom=2048 if bool(spec and spec.supports_reasoning) else 0,
+    )
+
+
+def _place_ollama(chain: list[Provider]) -> None:
+    """Insert the local provider at the head or tail per ``OLLAMA_PLACEMENT``.
+
+    - ``last`` (default): cloud-first, Ollama as a zero-cost offline fallback —
+      preserves today's behaviour and quality ordering exactly.
+    - ``first``: local-first cost saver — every call the local model can serve
+      is free; the cloud chain becomes automatic fallback when Ollama is down
+      or the prompt is oversized. This is the "minimize API cost" lever.
+    """
+    provider = _ollama_provider()
+    if provider is None:
+        return
+    if _env("OLLAMA_PLACEMENT", "last").lower() == "first":
+        chain.insert(0, provider)
+    else:
+        chain.append(provider)
 
 
 _chain: list[Provider] | None = None
@@ -579,9 +647,29 @@ async def call_with_failover(
     auto-resume instead of losing the engagement.
     """
     if byok_key:
+        # BYOK is a single premium target by design — the router does not
+        # reorder a one-provider chain, so it is bypassed here (ADR-012 §6.1:
+        # "BYOK present → honor it").
         chain: list[Provider] = [byok_provider(byok_key)]
     else:
-        chain = get_chain()
+        # Task-routing seam (ADR-012 Phase 1). The router may reorder/filter the
+        # chain for this task; with the default empty ruleset it is an identity
+        # function, so behavior is unchanged. Failover below is untouched — it
+        # simply walks whatever ordered chain it is handed. Imported lazily
+        # (like `_model_spec`) so `providers` stays importable in isolation.
+        from app.pipeline import router
+
+        chain = router.route_chain(
+            get_chain(),
+            router.TaskDescriptor(
+                agent_name=agent_name,
+                has_images=bool(images),
+                # Rough token estimate (~4 chars/token) so long-context routing
+                # can steer big prompts away from tier-capped providers. Advisory
+                # only — the router treats an unknown/oversized case as fail-open.
+                prompt_size=(len(system) + len(user)) // 4,
+            ),
+        )
     if not chain:
         raise RuntimeError(
             "No LLM provider configured — set GEMINI_API_KEY, "

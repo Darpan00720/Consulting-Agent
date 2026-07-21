@@ -28,7 +28,9 @@ from app.pipeline import (
     evidence_normalizer,
     evidence_schema,
     evidence_store,
+    knowledge_adapter,
     ledger_builder,
+    organization_adapter,
     prompts,
     quantcheck,
     sensitivity_analysis,
@@ -542,15 +544,47 @@ async def _run_engagement(
             max_tokens=2000,
         )
 
+        # ADR-014 Phase 2: an optional, feature-flagged reference section for
+        # the planner, from app.organization's typed role catalog. Byte-
+        # identical prompt when the flag is off (config.
+        # ORGANIZATION_LAYER_ENABLED defaults to off) — see
+        # app/pipeline/organization_adapter.py.
+        organization_layer_section = ""
+        if config.ORGANIZATION_LAYER_ENABLED:
+            organization_layer_index = organization_adapter.organization_layer_index()
+            if organization_layer_index:
+                organization_layer_section = _section(
+                    "Structured organization/role catalog (app.organization "
+                    "— supplementary reference for staffing considerations)",
+                    organization_layer_index,
+                )
+
         outputs["planning"] = await phase(
             "planning",
             "planner",
             case
             + _section("Intake brief", outputs["classify"])
             + _section("Information gaps & assumption ledger", outputs["gap_analysis"])
+            + organization_layer_section
             + "\n\nProduce the engagement plan.",
             max_tokens=1500,
         )
+
+        # ADR-014 Phase 1: an optional, feature-flagged second reference
+        # alongside (never replacing) the vault index above, from
+        # app.knowledge's typed framework catalog. Byte-identical prompt
+        # when the flag is off (config.KNOWLEDGE_LIBRARY_ENABLED defaults to
+        # off) — see app/pipeline/knowledge_adapter.py.
+        knowledge_library_section = ""
+        if config.KNOWLEDGE_LIBRARY_ENABLED:
+            knowledge_library_index = knowledge_adapter.knowledge_library_index()
+            if knowledge_library_index:
+                knowledge_library_section = _section(
+                    "Structured framework catalog (app.knowledge — "
+                    "supplementary reference; select from the vault index "
+                    "above)",
+                    knowledge_library_index,
+                )
 
         outputs["framing"] = await phase(
             "framing",
@@ -562,6 +596,7 @@ async def _run_engagement(
                 "Available frameworks (governed knowledge vault index)",
                 prompts.vault_framework_index(),
             )
+            + knowledge_library_section
             + "\n\nSelect and adapt the primary and supporting frameworks from the "
             "index above. Name each selected framework exactly as it appears in "
             "the index.",
@@ -1139,7 +1174,7 @@ async def _run_engagement(
             )
             if top_sensitivity:
                 sensitivity_section = _section(
-                    "COMPUTED SENSITIVITY RANKING (ADR-010 P3 — exact, not a " "guess)",
+                    "COMPUTED SENSITIVITY RANKING (ADR-010 P3 — exact, not a guess)",
                     "Every assumption with a plausibility band was re-evaluated "
                     "at its low and high bound against the verified ledger; "
                     "ranked by the largest resulting swing in any dependent "

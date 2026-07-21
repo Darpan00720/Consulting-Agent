@@ -61,6 +61,20 @@ MODEL = "auto"
 MAX_TOKENS = int(_env("STRATAGENT_MAX_TOKENS", "4096"))
 REPORT_MAX_TOKENS = int(_env("STRATAGENT_REPORT_MAX_TOKENS", "8192"))
 
+# Local model via Ollama (pipeline/providers.py, docs/operations/
+# Ollama-Local-Runtime.md). Opt-in and additive — the cloud chain is unchanged
+# when this is off. A local model is a weak analyst, so the default placement is
+# "last" (zero-cost offline fallback); set OLLAMA_PLACEMENT=first for a
+# local-first cost saver that falls back to cloud automatically.
+#   OLLAMA_ENABLED   — "1" joins Ollama to the chain (default off).
+#   OLLAMA_BASE_URL  — OpenAI-compatible endpoint (default http://localhost:11434/v1).
+#   OLLAMA_MODEL     — pulled model id (default qwen3:4b).
+#   OLLAMA_PLACEMENT — "first" (local-first) or "last" (fallback, default).
+OLLAMA_ENABLED = _env("OLLAMA_ENABLED", "") == "1"
+OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+OLLAMA_MODEL = _env("OLLAMA_MODEL", "qwen3:4b")
+OLLAMA_PLACEMENT = _env("OLLAMA_PLACEMENT", "last")
+
 # The user-facing "model" choice is the chain itself — providers and models
 # are a server concern. Legacy Groq ids stay accepted for old clients.
 MODEL_CHOICES = [
@@ -112,6 +126,23 @@ TELEMETRY_DIR = _env("STRATAGENT_TELEMETRY_DIR", "") or str(
 )
 TELEMETRY_SAMPLE_RATE = float(_env("STRATAGENT_TELEMETRY_SAMPLE", "1.0"))
 
+# ADR-014 Phase 1 — app.knowledge (typed framework catalog) integration into
+# the framing-phase prompt. Purely additive: an extra reference section
+# alongside (never replacing) the existing knowledge-vault index. Default
+# off, consistent with ADR-014 §5 "feature-flagged rollout... defaulting to
+# off in production until explicitly enabled."
+#   KNOWLEDGE_LIBRARY_ENABLED — "1" adds the app.knowledge index to the
+#   framing prompt (default off; framing prompt is byte-identical when off).
+KNOWLEDGE_LIBRARY_ENABLED = _env("STRATAGENT_KNOWLEDGE_LIBRARY", "") == "1"
+
+# ADR-014 Phase 2 — app.organization (typed 25-role catalog) integration into
+# the planning-phase prompt. Purely additive: an extra reference section for
+# the planner agent alongside its existing free-text engagement plan. Same
+# feature-flagged-off-by-default convention as Phase 1.
+#   ORGANIZATION_LAYER_ENABLED — "1" adds the app.organization index to the
+#   planning prompt (default off; planning prompt is byte-identical when off).
+ORGANIZATION_LAYER_ENABLED = _env("STRATAGENT_ORGANIZATION_LAYER", "") == "1"
+
 # Max engagements running their LLM pipeline at once (server-wide). Requests
 # still return 202 immediately; work beyond this waits its turn rather than
 # piling unbounded concurrent load onto the single SQLite writer and the shared
@@ -146,6 +177,9 @@ SERVER_HAS_KEY = bool(
         os.environ.get("CLOUDFLARE_ACCOUNT_ID")
         and os.environ.get("CLOUDFLARE_API_TOKEN")
     )
+    # A local Ollama model is a real provider — a local-only setup (no cloud
+    # keys) must not report "no free tier" and refuse to run.
+    or OLLAMA_ENABLED
 )
 
 # Per-browser daily engagement quota. X-Client-Id is CALLER-ASSERTED, so this

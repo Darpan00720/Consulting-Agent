@@ -360,7 +360,7 @@ def admin_overview() -> dict[str, Any]:
             """).fetchone()
         feedback_count = conn.execute("SELECT COUNT(*) AS n FROM feedback").fetchone()
         lessons_count = conn.execute("SELECT COUNT(*) AS n FROM lessons").fetchone()
-    out = {k: (row[k] or 0) for k in row.keys()}
+    out = {k: (row[k] or 0) for k in row.keys()}  # noqa: SIM118 — sqlite3.Row iterates values, not keys; .keys() is required
     out["feedback_count"] = feedback_count["n"]
     out["lessons_learned"] = lessons_count["n"]
     return out

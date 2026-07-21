@@ -1,10 +1,11 @@
 ---
 adr: 010
 title: StratAgent as a Consulting Operating System — unify, don't rebuild
-status: Accepted (P1 + P2 + P3 implemented 2026-07-17; P3.5 dev-workflow tooling added 2026-07-17)
+status: Accepted (P1 + P2 + P3 implemented 2026-07-17; P3.5 dev-workflow tooling added 2026-07-17; P3.6 multi-model engineering governance added 2026-07-17)
 date: 2026-07-17
 deciders: [Principal Architect]
-relates: [ADR-008 Repository Topology, ADR-009 Deterministic Quant Gate, v2.0 Spec]
+relates: [ADR-008 Repository Topology, ADR-009 Deterministic Quant Gate, ADR-014 Consulting Architecture Convergence, v2.0 Spec]
+supersedes: []
 tags: [architecture, determinism, evidence, governance, roadmap]
 ---
 
@@ -84,6 +85,18 @@ genuinely new capabilities remain:
   before it ships. Net-new.
 
 ## 4. Target architecture (unified)
+
+> **2026-07-19 note (added by the ADR-014 documentation consistency
+> audit):** the diagram below is the original P1-era aspirational sketch
+> and predates both this ADR's own implemented shape (§6a–6d, which uses
+> different concrete module names — `ledger_builder.py`, `evidence_schema.py`,
+> `quantcheck.py`, etc.) and the separate `app.consulting`/`app.knowledge`/
+> `app.organization`/`app.synthesis`/`app.deliverables`/`app.evaluation`
+> architecture ("W7–W12"). It is kept here as a historical record of the
+> original design intent, not as a current implementation map. **ADR-014
+> is the authoritative document governing the relationship between this
+> pipeline and W7–W12** — this diagram is not updated to reflect that
+> decision and should not be read as contradicting it.
 
 ```
 LIVE PIPELINE (rebuilt on packages/ core)
@@ -518,6 +531,88 @@ Quant Gate / Ledger Builder / Evidence Store / consulting-intelligence
 modules complete" — not to "mandatory for everything," since no
 infrastructural dependency on Codex exists and it draws on the user's own
 OpenAI quota.
+
+## 6d. Phase 3.6 — Multi-Model Engineering Governance (2026-07-17)
+
+Same scope note as §6c: **this phase changes how the engineering team builds
+StratAgent, not StratAgent itself.** No product code depends on any of the
+three models named here existing.
+
+### What prompted this phase
+
+§6c installed Codex and, after one live review, found real evidence that a
+second independent model catches what Claude's self-review misses (three
+real bugs, including one that silently broke this ADR's own "no LLM invents
+the ledger" guarantee, in already-tested, already-self-reviewed code). This
+phase generalizes that finding into a standing protocol — across three
+models, not one-off — and answers the four things a one-off installation
+note didn't: who owns which category of work, what review gate a change
+actually needs before it ships, how disagreements between models get
+resolved, and what evidence a recommendation needs before it's trusted.
+
+### Model roster and honest status
+
+| Model | Status | Role |
+|---|---|---|
+| Claude | Primary, always available | Owns anything requiring continuity across this repo's ADRs, agent prompts, and history; sole author of consulting-domain reasoning and ADR text |
+| OpenAI Codex | Installed, live, validated (§6c) | Default independent code reviewer and mechanical-task delegate |
+| Gemini CLI | Installed and available on the machine (`gemini --version` succeeds), **but deliberately not part of the active engineering architecture** (the live dev toolchain is Claude + Codex + Ollama). Gemini is also in production as one of the dashboard's *product* free-tier LLM providers (`apps/dashboard/README.md`) — an unrelated, product-side use. | Designed role only, **not wired in as a live gate**: third model family, large-context tie-breaker for disputes Claude and Codex can't settle between themselves |
+
+> **Correction (2026-07-18):** the roster row above and the paragraph below
+> were originally written when no Gemini CLI was installed. The Gemini CLI is
+> now installed and operational (`gemini --version` succeeds), so the earlier
+> "not installed / not verified" claim no longer holds. The *decision* it
+> supported still stands: Gemini is deliberately kept **out of the active
+> engineering toolchain** (Claude + Codex + Ollama), so every governance rule
+> naming Gemini remains a *designed* contract, not a live gate — the caveat is
+> now a deliberate exclusion, not a pending install. The local model runtime
+> that was actually installed, verified, and integrated is **Ollama**, not
+> Gemini (see [`Ollama-Local-Runtime.md`](../operations/Ollama-Local-Runtime.md)).
+> Kimi CLI is likewise installed but excluded from the architecture because it
+> requires paid API credits.
+
+Gemini's row was originally written the same way Codex's was written *before*
+§6c's installation — a designed contract, not a claim of present capability —
+and the "verify before it becomes a live gate" discipline it describes was the
+correct standard at the time. Installation has since been confirmed; adoption
+into the active toolchain has deliberately not, per the correction above.
+
+### The governance model (full detail in the operating guide)
+
+Rather than duplicate a twelve-row responsibility matrix, a full review
+protocol, conflict-resolution rules, and evidence requirements inline here,
+they live in
+[`docs/operations/Engineering-Workflow.md`](../operations/Engineering-Workflow.md)
+— this section is the architectural record of the decision, that document is
+the thing a contributor actually reads day to day (same split as §6c and
+`Codex-Workflow.md`). Summary of the load-bearing rules:
+
+- **Consulting-domain reasoning stays Claude-only**, unchanged from §6c — the
+  hard boundary that makes the Quant Gate mean anything.
+- **Deterministic modules (P1–P3 core) now require, not merely encourage,
+  Codex adversarial-review before a change is considered complete.** §6c's
+  "strongly encouraged" is upgraded to a hard gate for
+  `ledger_builder.py`, `quantcheck.py`, `evidence_normalizer.py`,
+  `evidence_store.py`, `consulting_validators.py`, `recommendation_ranker.py`
+  — the exact files where the one real Codex finding to date lived.
+  Executive-reporting modules (report-writer, render/tie-out logic) get the
+  same gate, since a silent bug there ships directly to a client.
+- **No factual disagreement between models is settled by argument** — only
+  by reproduction (a failing test, then a passing one, or a standalone repro
+  script). This generalizes the exact discipline §6c already used to accept
+  Codex's three findings, to any model's claim, including Claude's own.
+- **A judgment disagreement no test can settle** escalates to a third,
+  independent model read (Gemini, once verified) or, failing that, to the
+  human — never to one AI unilaterally overriding another.
+
+### Consequence of this phase
+
+No new code, no new dependency, no change to the product. What changes is
+that "run Codex before touching the ledger builder" — previously a
+recommendation in one document — is now a stated gate covering three
+models, sized by change tier, with an explicit answer for what happens when
+models disagree. This is governance catching up to a result already
+observed, not a change made in anticipation of one.
 
 ## 7. What I am asking to decide
 

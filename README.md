@@ -259,8 +259,8 @@ spelled out in
 |---|---|
 | **Operate it** | [Operations Runbook](docs/operations/Operations-Runbook.md) |
 | Use it | [Quickstart](docs/guides/QUICKSTART.md) · [User Guide](docs/guides/USER_GUIDE.md) |
-| Build on it | [Developer Guide](docs/guides/DEVELOPER_GUIDE.md) |
-| Architecture | [ADRs 001–009](docs/architecture/) · [Execution Flow](docs/architecture/Execution-Flow.md) |
+| Build on it | [Developer Guide](docs/guides/DEVELOPER_GUIDE.md) · [Multi-Model Engineering Workflow](docs/operations/Engineering-Workflow.md) |
+| Architecture | [ADRs 001–010](docs/architecture/) · [Execution Flow](docs/architecture/Execution-Flow.md) |
 | Observability | [Telemetry](docs/observability/Telemetry-Architecture.md) · [Dashboards](docs/observability/Dashboards.md) |
 | Evidence & quality | [Research Evaluation](docs/reviews/v1.0-Research-Evaluation.md) · [RC1 Audit](docs/reviews/RC1-Engineering-Audit.md) |
 | Try with users | [Beta Program](docs/beta/Beta-Program-Guide.md) |

@@ -22,13 +22,13 @@ def test_container_entrypoint_survives_a_root_owned_paas_volume():
     user_lines = [
         ln for ln in dockerfile.splitlines() if ln.strip().startswith("USER ")
     ]
-    assert (
-        not user_lines
-    ), f"USER directive breaks the chown-then-drop flow: {user_lines}"
+    assert not user_lines, (
+        f"USER directive breaks the chown-then-drop flow: {user_lines}"
+    )
 
     assert "chown -R app" in entrypoint, "entrypoint must fix the volume ownership"
     assert "exec gosu app" in entrypoint, "entrypoint must drop root before running"
     assert "${PORT:-8000}" in entrypoint, "must honour the platform's $PORT"
-    assert (
-        "STRATAGENT_DB" in entrypoint
-    ), "must derive the dir from the configured DB path"
+    assert "STRATAGENT_DB" in entrypoint, (
+        "must derive the dir from the configured DB path"
+    )

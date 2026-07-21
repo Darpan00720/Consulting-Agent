@@ -73,6 +73,20 @@ def test_health(client):
     assert body["ok"] is True and body["mock"] is True and body["free_tier"] is True
 
 
+def test_golden_case_grading_route_is_not_mounted(client):
+    """2026-07-19 RC1 adversarial review finding: an earlier ADR-014 draft
+    claimed `app.pipeline.grading` (golden-case grading) is "already live,
+    wired into app/routers/cases.py" — but `cases.router` is never
+    `include_router`'d in app/main.py (only `engagements` and `admin` are),
+    matching main.py's own comment that the cases/evals surface was
+    deliberately removed from the public product. This test pins that fact
+    structurally: if `cases.router` is ever mounted, this test starts
+    failing, which is the correct signal to also update ADR-014 §3.5/§6.
+    """
+    response = client.post("/api/cases", json={"case": "x", "official_answer": "y"})
+    assert response.status_code == 404
+
+
 def test_requires_client_id(client):
     assert client.get("/api/engagements").status_code == 400
     assert (
@@ -230,9 +244,8 @@ def test_telemetry_feeds_the_cores_quality_analytics(tmp_path, monkeypatch):
     just well-formed. quality_analytics() computes reviewer_pass_rate from
     metadata['verdict'] on terminal REVIEW events — pin that contract, since a
     silent break turns the ops dashboard into zeros that look like health."""
-    from telemetry import JSONLSink, quality_analytics
-
     from app import telemetry_bridge
+    from telemetry import JSONLSink, quality_analytics
 
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "qual.db")
     monkeypatch.setattr(config, "TELEMETRY_ENABLED", True)
@@ -1470,9 +1483,9 @@ def test_config_survives_the_empty_env_vars_compose_exports():
         capture_output=True,
         text=True,
     )
-    assert (
-        proc.returncode == 0
-    ), f"config crashed on compose's empty env vars:\n{proc.stderr[-600:]}"
+    assert proc.returncode == 0, (
+        f"config crashed on compose's empty env vars:\n{proc.stderr[-600:]}"
+    )
     assert "ok" in proc.stdout
     importlib.import_module("app.config")  # keep the in-process module loaded
 

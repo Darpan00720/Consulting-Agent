@@ -772,7 +772,7 @@ def tie_out(
             QuantDefect(
                 "tie_out",
                 (),
-                f"orphan number {value}{suffix and ' ' + suffix} in: \"{snippet}\" "
+                f'orphan number {value}{suffix and " " + suffix} in: "{snippet}" '
                 "— matches no quant-ledger value and no figure in the client's "
                 "case prompt. Every figure must be a ledger value (rounded for "
                 "prose is fine) — never re-derive or invent a number in the "

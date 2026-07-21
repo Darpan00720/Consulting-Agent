@@ -5,6 +5,7 @@ status: Accepted (implemented 2026-07-16 — quantcheck.py + engine wiring + 25 
 date: 2026-07-16
 deciders: [Principal Architect]
 relates: [ADR-006 Governance Gates, ADR-002 §Quality Gates, dashboard pipeline engine]
+supersedes: []
 tags: [governance, math, verification, anti-hallucination, dashboard]
 ---
 

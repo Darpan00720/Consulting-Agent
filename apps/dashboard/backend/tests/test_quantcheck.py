@@ -576,8 +576,7 @@ def test_interim_banner_caps_a_long_defect_list(tmp_path, monkeypatch):
 
     # A ledger with 15 unsourced assumptions → 15 schema defects, all similar.
     entries = ",".join(
-        f'{{"id":"A{i}","kind":"assumption","label":"x{i}","value":1,'
-        f'"unit":"RATIO"}}'
+        f'{{"id":"A{i}","kind":"assumption","label":"x{i}","value":1,"unit":"RATIO"}}'
         for i in range(15)
     )
     bad_ledger = "reconciliation\n\n```quant\n[" + entries + "]\n```\n"
