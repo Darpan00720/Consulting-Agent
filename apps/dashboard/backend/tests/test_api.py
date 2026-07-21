@@ -442,6 +442,37 @@ def test_reflection_learns_lessons_on_blocked_run(tmp_path, monkeypatch):
     db.reset_for_tests()
 
 
+def test_standing_lessons_reach_engagement_manager_and_report_writer(
+    tmp_path, monkeypatch
+):
+    """2026-07-21 finding: _standing_lessons() was only ever injected into the
+    issue-tree-generator prompt — the one phase with no ability to act on a
+    lesson like "never introduce an orphan number", since it builds the MECE
+    tree, not ledger atoms or report prose. The Engagement Manager (who
+    authors the ledger and Breakeven column) and report-writer (who carries
+    numbers into the final report) never saw stored lessons at all, so the
+    learning loop could capture a correct insight and still have no way to
+    act on it next run. Fixed by also injecting into reconcile_context (EM)
+    and final_context (challenger + report-writer)."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "lessons_reach_em.db")
+    db.reset_for_tests()
+    assert db.add_lesson("Never introduce an orphan number not in the ledger.")
+    captured: dict[str, str] = {}
+
+    async def fake_call(agent, system, user, **kw):
+        if agent in ("engagement-manager", "report-writer", "challenger"):
+            captured[agent] = user
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    asyncio.run(run_engagement(eid, CASE, call=fake_call))
+
+    for agent in ("engagement-manager", "report-writer", "challenger"):
+        assert "Standing lessons from past engagements" in captured[agent], agent
+        assert "orphan number" in captured[agent]
+    db.reset_for_tests()
+
+
 def test_reflection_dedupes_lessons(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "dedupe.db")
     db.reset_for_tests()

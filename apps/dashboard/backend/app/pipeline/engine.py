@@ -214,6 +214,18 @@ cost synergy $30M while operations said $15M), you MUST pick ONE authoritative
 value and state why (prefer the more conservative / better-sourced figure; a
 hard operational ceiling beats an optimistic estimate).
 Columns: ID | Value | Confidence | Owner | Breakeven (what would flip it).
+QUANT DISCIPLINE applies to this table too, not just the ```atoms block below:
+the Breakeven column is a narrative description of an EXISTING ledger value's
+threshold (e.g. "utilization ≥ 78%" when A2's own value/band already implies
+78%) — it is never a place to introduce a NEW number. Specifically forbidden,
+here and anywhere else in your prose: alternate-scenario figures, learning-
+adjusted or discounted variants, sensitivity-analysis numbers, "what-if"
+numbers, and explanatory numeric examples — UNLESS that number is already a
+client fact or you also add it as its own atom (typically a second
+``assumption`` or ``derived`` atom for the alternate case) in the ```atoms
+block below. A Breakeven cell citing a number with no atom behind it fails
+the same deterministic check as an orphan number in the final report — just
+caught here, in your own reconciliation, instead of several phases later.
 
 ## Reconciled key figures
 A short table of the decision-critical derived numbers, each with ONE value
@@ -917,6 +929,7 @@ async def _run_engagement(
             + _section("Issue tree", outputs["issue_tree"])
             + evidence_section
             + analysis_detail
+            + lessons
         )
 
         canonical = await phase(
@@ -955,7 +968,34 @@ async def _run_engagement(
                     quantcheck.QuantDefect("atoms", (), msg) for msg in built.errors
                 )
                 return canonical, quantcheck.QuantReport(False, defects, None)
-            return built.markdown, quantcheck.verify_ledger(built.markdown)
+            ledger_report = quantcheck.verify_ledger(built.markdown)
+            if not ledger_report.passed:
+                return built.markdown, ledger_report
+            # 2026-07-21 finding (Board Ready benchmark run): the EM's OWN
+            # reconciliation prose has a free-text "Assumption Ledger" table
+            # with a narrative "Breakeven (what would flip it)" column —
+            # entirely separate from the ```atoms block, and never checked by
+            # verify_ledger above, which only looks at the machine-built
+            # ```quant block. Nothing stopped the EM writing an alternate-
+            # scenario figure into that prose (e.g. "85.4% (or 62% with
+            # learning discount)") with no ledger backing at all — it was
+            # only ever caught once report-writer had already carried it,
+            # unquestioned, into the final report, by which point tie_out's
+            # rework loop has to surgically fix prose deep inside a finished
+            # deliverable rather than a short reconciliation. Running the
+            # SAME tie_out check here, immediately, catches it at the source
+            # and lets the EM fix its own prose using the SAME rework budget
+            # already spent on ledger defects — defense in depth, not a
+            # replacement for the final report's own tie_out (still runs
+            # unchanged; see the report tie-out section below).
+            prose_tie = quantcheck.tie_out(
+                built.markdown, ledger_report.entries, case_prompt
+            )
+            if not prose_tie.passed:
+                return built.markdown, quantcheck.QuantReport(
+                    False, prose_tie.defects, ledger_report.entries
+                )
+            return built.markdown, ledger_report
 
         async def quant_verified(
             canonical: str,
@@ -983,14 +1023,22 @@ async def _run_engagement(
                         "exact; every one must be fixed",
                         quantcheck.format_defects(verdict),
                     )
-                    + "\n\nRe-issue the FULL canonical reconciliation with a "
-                    "corrected ```atoms block. Fix exactly what the defects "
-                    "name — correct the atom's value, band, unit, source, or "
-                    "expr. Remember: you supply evidence atoms only; the code "
-                    "computes derived values, so never put a value on a derived "
-                    "atom. Conclusions stay unchanged unless a corrected number "
-                    "genuinely invalidates them, in which case say so in "
-                    "Corrections applied.",
+                    + "\n\nRe-issue the FULL canonical reconciliation. Fix "
+                    "exactly what the defects name. For an 'atoms'-check "
+                    "defect: correct the atom's value, band, unit, source, or "
+                    "expr in the ```atoms block — you supply evidence atoms "
+                    "only, the code computes derived values, so never put a "
+                    "value on a derived atom. For a 'tie_out'-check defect: "
+                    "an orphan number was found in YOUR OWN PROSE (e.g. the "
+                    "Assumption Ledger's Breakeven column) — this includes "
+                    "any alternate-scenario, learning-adjusted, or 'what-if' "
+                    "figure you stated without it being a ledger value or a "
+                    "client fact. Either replace it with the correct ledger "
+                    "value, or remove the claim entirely — never invent a "
+                    "bridging figure, in prose or in atoms. Conclusions stay "
+                    "unchanged unless a corrected number genuinely "
+                    "invalidates them, in which case say so in Corrections "
+                    "applied.",
                     system_override=ENGAGEMENT_MANAGER_SYSTEM,
                     checkpoint=False,
                     max_tokens=6000,
@@ -1176,6 +1224,7 @@ async def _run_engagement(
             + _section("Issue tree", outputs["issue_tree"])
             + _section("CANONICAL RECONCILIATION — single source of truth", canonical)
             + analysis_detail
+            + lessons
         )
         # Recommendation Gate backstop (requirement #5): re-parse the now-final
         # canonical text (cheap, deterministic, no LLM call) purely to recover
@@ -1427,13 +1476,22 @@ async def _run_engagement(
             "('market cap fell from A to B, a loss of A-B'), an addition, or a "
             "percentage conversion you do 'in your head' is exactly as forbidden "
             "as inventing a number outright, because the platform cannot verify "
-            "math it never saw. If you need a computed figure that has no "
-            "matching ledger entry, you have exactly two options: describe the "
-            "direction and magnitude qualitatively with NO number ('materially "
-            "destroys shareholder value'), or omit that specific claim — never "
-            "compute it yourself. A deterministic tie-out scans the finished "
-            "report and flags every orphan number; it has no exception for "
-            "'simple' arithmetic.",
+            "math it never saw. It equally covers introducing a WHOLE NEW figure "
+            "that is not simple arithmetic on existing values at all — an "
+            "alternate-scenario number, a 'learning-adjusted' or discounted "
+            "variant, a sensitivity-analysis figure, a 'what-if' number, or an "
+            "explanatory numeric example — ANYWHERE, including a parenthetical "
+            "aside in a table cell (e.g. a Breakeven column reading '85.4% (or "
+            "62% with some adjustment)' — that second number is exactly as "
+            "forbidden as the first would be if it weren't a ledger value). If "
+            "you need a computed figure that has no matching ledger entry, you "
+            "have exactly two options: describe the direction and magnitude "
+            "qualitatively with NO number ('materially destroys shareholder "
+            "value'), or omit that specific claim — never compute it yourself, "
+            "in the main text or in a parenthetical. A deterministic tie-out "
+            "scans the ENTIRE finished report — every section, every table "
+            "cell, every parenthetical — and flags every orphan number; it has "
+            "no exception for 'simple' arithmetic or an aside.",
             checkpoint=False,
             # A structured case must fit a full memo AND an answer per question.
             # At the base budget the model spends it all on the memo and silently

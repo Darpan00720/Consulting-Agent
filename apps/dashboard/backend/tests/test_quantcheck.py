@@ -812,6 +812,123 @@ def test_tie_out_rework_loop_honours_a_raised_max_rework(tmp_path, monkeypatch):
     db.reset_for_tests()
 
 
+# --- EM-prose orphan numbers (Board Ready benchmark run, 2026-07-21) --------
+#
+# Root cause: the EM's own reconciliation prose has a free-text "Assumption
+# Ledger" table with a narrative Breakeven column (engine.py's
+# ENGAGEMENT_MANAGER_SYSTEM), entirely separate from the machine-verified
+# ```atoms/```quant blocks. Nothing checked THAT prose for orphan numbers
+# until report-writer had already carried an alternate-scenario figure (e.g.
+# "85.4% (or 62% with learning discount)") into the finished report, several
+# phases later. Fixed by running the SAME tie_out extraction+verification the
+# final report already gets, on the EM's own reconciliation text, immediately
+# after the ledger itself is confirmed clean — catching it at the source and
+# feeding the SAME existing rework loop, rather than only ever catching it
+# downstream once report-writer has propagated it into polished prose.
+
+_EM_PROSE_WITH_ORPHAN = (
+    "## Canonical assumption ledger\n"
+    "| ID | Value | Confidence | Owner | Breakeven |\n"
+    "| A1 | 0.01 | High | EM | 85.4% (or 62% with learning discount) |\n"
+) + QUANT
+
+_EM_PROSE_CLEAN = (
+    "## Canonical assumption ledger\n"
+    "| ID | Value | Confidence | Owner | Breakeven |\n"
+    "| A1 | 0.01 | High | EM | Margin uplift falls below 0.005 |\n"
+) + QUANT
+
+
+def test_em_prose_orphan_number_triggers_a_reconcile_rework(tmp_path, monkeypatch):
+    """An alternate-scenario figure in the EM's OWN Breakeven prose (never
+    part of the ```atoms/```quant blocks) must be caught immediately, before
+    reviewer/challenger/report-writer ever see it — not only once
+    report-writer has already carried it into the final report."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "em_prose_orphan.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 1)
+    db.reset_for_tests()
+    em_calls = {"n": 0}
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            em_calls["n"] += 1
+            if em_calls["n"] == 1:
+                return _EM_PROSE_WITH_ORPHAN
+            return _EM_PROSE_CLEAN  # the rework fixes it
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    assert em_calls["n"] == 2  # initial + exactly one rework, then converged
+    gate_events = [e for e in db.list_events(eid) if e["type"] == "quant_gate"]
+    assert any(
+        not e["payload"]["passed"] and any("62" in d for d in e["payload"]["defects"])
+        for e in gate_events
+    )
+    completed = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
+    )
+    assert completed["payload"]["review_ready"] is True
+    db.reset_for_tests()
+
+
+def test_em_prose_orphan_number_surviving_rework_ships_interim_report(
+    tmp_path, monkeypatch
+):
+    """If the EM never fixes its own prose even after the full rework budget,
+    the engagement still COMPLETES with the existing interim-report banner —
+    exactly like any other quant-gate defect that survives rework — never a
+    hard EngagementManagerValidationError termination. That early-termination
+    path is reserved for a COMPLETELY missing ledger (quant.entries is None);
+    here the ledger itself is genuinely fine, only the EM's prose is not, so
+    there is real, reviewable content and the existing "ship an honest
+    interim report" design applies unchanged."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "em_prose_unfixed.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 1)
+    db.reset_for_tests()
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return _EM_PROSE_WITH_ORPHAN  # never fixed, on every attempt
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "completed"  # not "failed"
+    md = engagement["report_md"]
+    assert "NOT BOARD-READY — INTERIM STATUS ONLY" in md
+    assert "quant-gate=FAILED" in md
+    db.reset_for_tests()
+
+
+def test_clean_em_prose_never_triggers_the_new_check(tmp_path, monkeypatch):
+    """Regression safety: a Breakeven column describing an EXISTING ledger
+    value's own threshold (no new number introduced) must not false-positive
+    — the EM should never be reworked for prose that names no orphan figure."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "em_prose_clean.db")
+    db.reset_for_tests()
+    em_calls = {"n": 0}
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            em_calls["n"] += 1
+            return _EM_PROSE_CLEAN
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    assert em_calls["n"] == 1  # no rework triggered
+    completed = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
+    )
+    assert completed["payload"]["review_ready"] is True
+    db.reset_for_tests()
+
+
 def test_tie_out_fails_closed_and_flags_the_report(tmp_path, monkeypatch):
     """If the orphan survives the rework, the report ships with an explicit
     not-review-ready warning naming the unverifiable figures."""
