@@ -76,7 +76,12 @@ def source_fingerprint(request: Request) -> str:
 
 
 class CreateEngagementRequest(BaseModel):
-    case_prompt: str = Field(min_length=40, max_length=20_000)
+    # No max_length here by design: a case brief shouldn't be artificially
+    # truncated. The `_cap_total_payload` validator below is the real
+    # backstop against a pathological request (already existed for images;
+    # now the only ceiling on case_prompt too) — memory/DoS protection, not a
+    # content-quality judgment about how long a real case is allowed to be.
+    case_prompt: str = Field(min_length=40)
     model: str | None = Field(default=None, max_length=64)
     # User's own API key (any supported provider — best-results path).
     # Used for this run only — never persisted, never logged.

@@ -750,6 +750,25 @@ def test_engagement_rejects_malformed_images(client):
     assert bad.status_code == 422
 
 
+def test_case_prompt_has_no_artificial_length_cap(client, monkeypatch):
+    """2026-07-21: case_prompt's own max_length=20_000 was removed by request
+    — a real case brief (e.g. a multi-page benchmark suite, several pasted
+    documents) shouldn't be truncated by an arbitrary content-quality
+    judgment. A long, real-shaped case (well past the old 20_000 cap) must be
+    accepted; the only remaining ceiling is the pre-existing aggregate
+    payload guard (memory/DoS protection, not a content limit) checked
+    separately below."""
+    monkeypatch.setattr(config, "MOCK_MODE", True)
+    long_case = CASE * 400  # comfortably over the old 20_000-char cap
+    assert len(long_case) > 20_000
+    resp = client.post(
+        "/api/engagements",
+        json={"case_prompt": long_case},
+        headers=CID_A,
+    )
+    assert resp.status_code == 202
+
+
 def test_aggregate_payload_ceiling(client):
     """Per-field caps allow ~42 MB in aggregate; the whole-request ceiling must
     reject that so one request can't pin memory or starve concurrent runs.
