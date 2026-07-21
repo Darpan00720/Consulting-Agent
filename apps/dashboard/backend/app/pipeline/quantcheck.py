@@ -56,7 +56,9 @@ class QuantDefect:
     """One machine-generated defect. ``message`` is exact and actionable —
     it is fed verbatim back to the Engagement Manager as the rework brief."""
 
-    check: str  # schema|reference|arithmetic|units|bounds|anchor|bridge|ledger|tie_out
+    # schema|reference|arithmetic|units|bounds|anchor|bridge|ledger|tie_out|
+    # unknown_evidence
+    check: str
     ids: tuple[str, ...]
     message: str
 
@@ -684,8 +686,21 @@ def _cycles(entries: Mapping[str, Entry]) -> list[QuantDefect]:
 # Material numbers in a report: currency, percents, magnitude-suffixed, and
 # comma-grouped figures. Deliberately NOT every integer — "3 options" or
 # "Step 2" is prose structure, not a quantitative claim.
+#
+# The leading sign group is deliberately narrow: a `-`/`−`/`–`
+# (ASCII hyphen, Unicode minus, en-dash — all three appear in LLM-written
+# prose for a negative figure, e.g. "ROIC dropped ... to –4%") counts as a
+# sign ONLY when it is not itself preceded by a digit. That distinguishes a
+# genuine negative ("deliver –4% ROIC") from a range's separator
+# ("62-75%" utilization) — the hyphen in a range is always digit-adjacent on
+# its left, a sign prefix never is. Real bug, found by reproducing a live
+# report where a correctly-cited negative ledger value (ROIC = -4%) was
+# flagged as an "orphan number": the old pattern had no sign group at all, so
+# "-4%" and "4%" parsed to the identical positive Decimal, and a negative
+# ledger entry could never tie out against its own correct citation.
 _NUMBER_TOKEN = re.compile(
     r"""
+    (?P<sign>(?<!\d)[-−–])?\s*
     (?P<curr>[€$£])?\s*
     (?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)
     \s*(?P<suffix>%|pp\b|[MBk]\b|million\b|billion\b|bn\b)?
@@ -715,6 +730,8 @@ def _report_numbers(text: str) -> list[tuple[Decimal, str, str]]:
             value = Decimal(plain)
         except InvalidOperation:  # pragma: no cover - regex guarantees digits
             continue
+        if match["sign"]:
+            value = -value
         lo = max(0, match.start() - 40)
         snippet = " ".join(text[lo : match.end() + 20].split())
         found.append((value, suffix, snippet))
@@ -786,6 +803,52 @@ def format_defects(report: QuantReport) -> str:
     """The defect list as a deterministic rework brief."""
     lines = [f"{i}. [{d.check}] {d.message}" for i, d in enumerate(report.defects, 1)]
     return "\n".join(lines)
+
+
+# --- unresolved unknowns (Recommendation Gate backstop) ----------------------
+
+_EVIDENCE_INSUFFICIENT = "evidence insufficient"
+
+
+def unresolved_unknowns(report_md: str, unknown_labels: tuple[str, ...]) -> QuantReport:
+    """Backstop for the Recommendation Gate: an ``unknown`` atom (a metric the
+    Engagement Manager explicitly declared could not be determined — no
+    reasonable estimate exists) must not be silently dropped or treated as
+    settled once the report is written.
+
+    Deliberately coarse, not a full dependency trace: nothing in this
+    pipeline reliably maps a free-text report claim back to the specific
+    atom it depends on, so this does not attempt to prove a *recommendation*
+    rests on an unknown. It proves something narrower but still real: for
+    each unknown label whose text is discussed anywhere in the report, an
+    explicit "Evidence Insufficient" marker (case-insensitive) must appear
+    nearby. A label never mentioned in the report at all is not flagged —
+    the report made no claim about it, so there is nothing to gate.
+    """
+    defects: list[QuantDefect] = []
+    lower_report = report_md.lower()
+    for label in unknown_labels:
+        needle = label.strip().lower()
+        if not needle:
+            continue
+        pos = lower_report.find(needle)
+        if pos == -1:
+            continue  # never discussed — nothing to gate
+        window = report_md[max(0, pos - 250) : pos + len(label) + 250].lower()
+        if _EVIDENCE_INSUFFICIENT not in window:
+            defects.append(
+                QuantDefect(
+                    "unknown_evidence",
+                    (),
+                    f"the Engagement Manager declared {label!r} UNKNOWN (no "
+                    "reasonable estimate exists), but the report discusses it "
+                    "without framing it as 'Evidence Insufficient' nearby — "
+                    "an unknown may not be silently treated as resolved. "
+                    "Either add that framing next to this discussion or "
+                    "remove the claim.",
+                )
+            )
+    return QuantReport(not defects, tuple(defects), None)
 
 
 # --- Decimal-safe JSON (shared by ledger_builder.py and evidence_store.py) --

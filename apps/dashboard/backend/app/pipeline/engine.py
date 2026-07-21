@@ -265,6 +265,16 @@ Rules (the builder + verifier enforce these):
 - A ``derived`` atom gives ONLY an ``expr`` over other atom keys, using
   + - * / ** and parentheses. DO NOT give it a ``value`` — the code computes it
   exactly, so you cannot get the arithmetic wrong (and must not try).
+- A fourth kind, ``unknown``, is for a metric that genuinely cannot be
+  determined — not estimated, not guessed, not interpolated from something
+  else. Use it instead of an ``assumption`` when no reasonable estimate
+  exists at all: ``{"key":"...","kind":"unknown","label":"<what could not be
+  determined>","unit":"...","source":"<what additional analysis or data
+  would resolve it>"}``. Never give it ``value``, ``low``/``high``, or
+  ``expr`` — those would make it a disguised guess. List every ``unknown``
+  atom again under a ``## Unresolved unknowns`` section of your prose output
+  (label + what would resolve it), so the report-writer sees them even
+  though they carry no ledger id.
 - Rates are RATIO (0.05 = 5%), never PCT. Never mix units or time scopes in one
   ``expr`` (annual + cumulative is a defect).
 - For any profitability / cost-change case, include a BRIDGE: derived atoms for
@@ -273,6 +283,15 @@ Rules (the builder + verifier enforce these):
   — plus a total derived atom with ``"bridge": true`` whose ``expr`` is the pure
   +/- sum of those component keys. The unexplained residual is itself a derived
   atom.
+- This applies beyond profitability/cost bridges: ANY headline magnitude the
+  report is likely to state — value destroyed/created from a metric change
+  (e.g. valuation or market-cap delta implied by a return-on-capital move),
+  a cost-saving or synergy estimate, an expected downside/risk exposure, an
+  option's estimated NPV or value gap versus an alternative — must be its own
+  derived atom with an ``expr`` here, not left for the report-writer to
+  compute later. The report-writer CANNOT add ledger atoms — if a number like
+  this is missing from your ``atoms`` block, it cannot legally appear in the
+  final report at all, so mint it now.
 - Where a derived figure has an independent factual counterpart (e.g. market
   share implied by SOM vs the company's actual revenue over the same market
   size), set ``"anchor":"<key>"`` on it so the verifier cross-checks them.
@@ -281,7 +300,10 @@ Rules:
 - Do NOT change any conclusion or recommendation — only harmonize IDs, numbers,
   and citations so there is a single source of truth.
 - Never invent data. If a figure genuinely cannot be reconciled without new
-  analysis, say so explicitly and mark it OPEN — do not paper over it.
+  analysis, say so explicitly, mark it OPEN in prose, AND emit it as a
+  ``kind: unknown`` atom (see above) — an OPEN marker in prose alone is not
+  machine-checked; the atom is what lets the report gate catch it if the
+  final report later ignores or silently resolves it.
 - Preserve every value as a labeled assumption; never upgrade an assumption to a
   fact.
 This canonical reconciliation supersedes any conflicting figure in the analyst
@@ -1096,6 +1118,12 @@ async def _run_engagement(
             + _section("CANONICAL RECONCILIATION — single source of truth", canonical)
             + analysis_detail
         )
+        # Recommendation Gate backstop (requirement #5): re-parse the now-final
+        # canonical text (cheap, deterministic, no LLM call) purely to recover
+        # any ``kind: unknown`` atom labels the EM declared — metrics it
+        # explicitly could not determine. Checked against the finished report
+        # below, alongside the tie-out.
+        unknown_labels = ledger_builder.build_from_markdown(canonical).unknowns
 
         challenge = await phase(
             "challenge",
@@ -1264,7 +1292,18 @@ async def _run_engagement(
             )
             + "and `## Appendix: assumptions log` (a markdown"
             " table with "
-            "columns ID | Confidence | Assumption | Breakeven).\n"
+            "columns ID | Confidence | Assumption | Breakeven | Validation, "
+            "where Validation is how to confirm the assumption before acting "
+            "on it — e.g. 'confirm against Q3 plant-level OEE reports').\n"
+            "- EVIDENCE INSUFFICIENCY (machine-enforced): if the canonical "
+            "reconciliation's `## Unresolved unknowns` section lists a metric "
+            "the Engagement Manager could not determine, do not present a firm "
+            "finding or recommendation resting on it. Render it instead as "
+            "'Evidence Insufficient — <what additional analysis/data would "
+            "resolve it>' wherever that topic comes up, and recommend the "
+            "specific analysis needed as a next step. A recommendation may "
+            "still stand on the evidence that IS available — this only bars "
+            "treating an explicit unknown as if it were settled.\n"
             "- Use markdown tables for every option comparison and every set of "
             "figures; keep prose tight and decision-oriented (MECE, no hedging beyond "
             "the labeled assumptions).\n"
@@ -1295,8 +1334,18 @@ async def _run_engagement(
             "be a quant-ledger value or a number stated in the client's case "
             "prompt. You may round a ledger value for prose, but NEVER re-derive, "
             "combine, or invent a number — a figure you want that is not in the "
-            "ledger does not go in the report. A deterministic tie-out scans the "
-            "finished report and flags every orphan number.",
+            "ledger does not go in the report. This ban covers ANY arithmetic on "
+            "ledger values, however simple it feels while writing — a subtraction "
+            "('market cap fell from A to B, a loss of A-B'), an addition, or a "
+            "percentage conversion you do 'in your head' is exactly as forbidden "
+            "as inventing a number outright, because the platform cannot verify "
+            "math it never saw. If you need a computed figure that has no "
+            "matching ledger entry, you have exactly two options: describe the "
+            "direction and magnitude qualitatively with NO number ('materially "
+            "destroys shareholder value'), or omit that specific claim — never "
+            "compute it yourself. A deterministic tie-out scans the finished "
+            "report and flags every orphan number; it has no exception for "
+            "'simple' arithmetic.",
             checkpoint=False,
             # A structured case must fit a full memo AND an answer per question.
             # At the base budget the model spends it all on the memo and silently
@@ -1322,41 +1371,58 @@ async def _run_engagement(
             else quantcheck.QuantReport(True, (), None)
         )
         if quant.passed and not tie.passed:
-            # Ledger was fine; only the report cited orphan numbers — worth
-            # one rework, since the fix is narrow (swap the bad figures).
-            await _emit(
-                engagement_id,
-                "quant_tie_out",
-                {
-                    "passed": False,
-                    "fixing": True,
-                    "defects": [d.message for d in tie.defects],
-                },
-            )
-            report = await phase(
-                "reporting",
-                "report-writer",
-                final_context
-                + _section("Your previous report", report)
-                + _section(
-                    "ORPHAN NUMBERS — deterministic tie-out output. Every "
-                    "one must be resolved",
-                    quantcheck.format_defects(tie),
+            # Ledger was fine; only the report cited orphan numbers — bounded
+            # rework loop, same MAX_REWORK convention as the ledger-fix loop
+            # above. Previously this was exactly one unconditional retry;
+            # widened after a live run (2026-07-21) showed a single retry
+            # sometimes still leaves defects unresolved (the model partially
+            # fixes the list and reports it as done). Default MAX_REWORK=1
+            # keeps default behavior identical to before — this only grants
+            # more attempts when an operator raises STRATAGENT_MAX_REWORK.
+            for _ in range(config.MAX_REWORK):
+                await _emit(
+                    engagement_id,
+                    "quant_tie_out",
+                    {
+                        "passed": False,
+                        "fixing": True,
+                        "defects": [d.message for d in tie.defects],
+                    },
                 )
-                + "\n\nRe-issue the FULL report. Replace every orphan number "
-                "with the correct quant-ledger value (rounded for prose is "
-                "fine) or remove the claim — never invent a bridging figure. "
-                "Change nothing else.",
-                checkpoint=False,
-                max_tokens=report_budget,
-            )
-            tie = quantcheck.tie_out(report, quant.entries, case_prompt)
+                report = await phase(
+                    "reporting",
+                    "report-writer",
+                    final_context
+                    + _section("Your previous report", report)
+                    + _section(
+                        "ORPHAN NUMBERS — deterministic tie-out output. Every "
+                        "one must be resolved",
+                        quantcheck.format_defects(tie),
+                    )
+                    + "\n\nRe-issue the FULL report. Replace every orphan number "
+                    "with the correct quant-ledger value (rounded for prose is "
+                    "fine) or remove the claim — never invent a bridging figure. "
+                    "Change nothing else.",
+                    checkpoint=False,
+                    max_tokens=report_budget,
+                )
+                tie = quantcheck.tie_out(report, quant.entries, case_prompt)
+                if tie.passed:
+                    break
+        # Recommendation Gate backstop (requirement #5): any EM-declared
+        # unknown must be surfaced as an explicit evidence-insufficiency, not
+        # silently dropped. No rework loop of its own (kept deliberately
+        # simple) — a violation joins `unresolved` below exactly like any
+        # other gate defect, which already fails the engagement closed.
+        unknowns_gate = quantcheck.unresolved_unknowns(report, unknown_labels)
         # Never re-run report-writer over broken LEDGER math (as opposed to an
         # orphan-number miss) — the EM already exhausted its fix budget; asking
         # report-writer to "fix" arithmetic it didn't produce just burns a
         # call. Report the defects verbatim instead of hiding them.
-        unresolved = (list(quant.defects) if not quant.passed else []) + (
-            [] if tie.passed else list(tie.defects)
+        unresolved = (
+            (list(quant.defects) if not quant.passed else [])
+            + ([] if tie.passed else list(tie.defects))
+            + ([] if unknowns_gate.passed else list(unknowns_gate.defects))
         )
         if unresolved:
             review_ready = False

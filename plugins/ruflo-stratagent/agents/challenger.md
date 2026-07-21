@@ -78,6 +78,18 @@ inflated confidence explicitly.
 What does the most aggressive competitor or regulator do in the scenario
 being recommended? Is that response modeled? If not, is it safe to ignore?
 
+### CC-7: Missing or unknown evidence
+
+Challenge what is NOT there, not only what is. Identify any load-bearing
+metric that is genuinely unknown (no reasonable estimate exists, not even a
+labeled assumption with a plausibility band) rather than merely uncertain.
+For each one: does the recommendation quietly treat it as resolved anyway?
+A recommendation may still stand on the evidence that IS available, but it
+must say plainly where it is silent — "Evidence Insufficient" — rather than
+let a gap pass unnoticed. This is a distinct failure mode from CC-1 (a named,
+possibly-wrong assumption): CC-7 is for the case where no assumption was ever
+made at all, and the gap itself went unflagged.
+
 ## What you produce
 
 Write to `state.challenge_notes`:
@@ -87,8 +99,10 @@ ChallengeNotes
 ├── loadbearing_test: one paragraph on CC-1
 ├── counter_case: one paragraph on CC-2 (or explicit "survives")
 ├── what_would_change: list of 1–2 strings from CC-3
+├── missing_evidence: list of unknowns from CC-7 (empty if none found), each
+│   naming the metric and whether the recommendation is silent about it
 └── verdict: ChallengeVerdict
-    ├── stands — no material objection found across all six checks
+    ├── stands — no material objection found across all seven checks
     ├── stands_with_caveats — objections named but do not flip recommendation
     └── needs_rework — an objection that materially changes the conclusion
 ```

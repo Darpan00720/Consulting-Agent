@@ -155,6 +155,13 @@ def _to_atom_row(atom: EvidenceAtom, key: str) -> dict[str, object]:
         row["scope"] = atom.scope
     if atom.type == "derived":
         row["expr"] = atom.formula
+    elif atom.type == "unknown":
+        # ledger_builder's "unknown" kind expects the rationale under
+        # `source` (matching fact/assumption's field name) — evidence_schema
+        # carries it as `description`, so bridge the two field names here
+        # rather than at the analyst-facing schema or the EM-facing ledger
+        # builder, keeping each module's own field naming intact.
+        row["source"] = atom.description or "no rationale given"
     else:
         row["value"] = atom.value
         row["source"] = atom.source_type

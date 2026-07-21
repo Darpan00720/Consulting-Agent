@@ -176,6 +176,56 @@ def test_schema_assumption_outside_its_band_is_rejected():
     assert any("outside its own band" in e for e in r.errors)
 
 
+UNKNOWN = (
+    '{"atom_id":"factory_util","category":"operational","type":"unknown",'
+    '"title":"Factory utilization by plant","unit":"RATIO",'
+    '"description":"needs plant-level OEE reports"}'
+)
+
+
+def test_schema_parses_a_valid_unknown_atom():
+    r = es.parse_evidence_block(_block(UNKNOWN), "oa")
+    assert r.errors == ()
+    atom = r.atoms[0]
+    assert atom.type == "unknown"
+    assert atom.value is None
+    assert atom.formula is None
+    assert atom.description == "needs plant-level OEE reports"
+
+
+def test_schema_unknown_atom_with_a_value_is_rejected():
+    guessing = UNKNOWN[:-1] + ',"value":0.62}'
+    r = es.parse_evidence_block(_block(guessing), "oa")
+    assert any("must not carry 'value'" in e for e in r.errors)
+
+
+def test_schema_unknown_atom_with_a_formula_is_rejected():
+    computing = UNKNOWN[:-1] + ',"formula":"annual_revenue * 2"}'
+    r = es.parse_evidence_block(_block(computing), "oa")
+    assert any("must not carry 'formula'" in e for e in r.errors)
+
+
+def test_schema_unknown_atom_with_a_band_is_rejected():
+    banded = UNKNOWN[:-1] + ',"low":0.5,"high":0.7}'
+    r = es.parse_evidence_block(_block(banded), "oa")
+    assert any("must not carry 'low'/'high'" in e for e in r.errors)
+
+
+def test_schema_unknown_atom_without_description_is_rejected():
+    no_description = UNKNOWN.replace(
+        ',"description":"needs plant-level OEE reports"', ""
+    )
+    r = es.parse_evidence_block(_block(no_description), "oa")
+    assert any("must state 'description'" in e for e in r.errors)
+
+
+def test_schema_unknown_atom_does_not_require_source_type():
+    """Unlike fact/assumption, an unknown has no provenance to state — there
+    is nothing sourced, that is the whole point."""
+    r = es.parse_evidence_block(_block(UNKNOWN), "oa")
+    assert r.errors == ()
+
+
 # ============================================================================
 # TASK 2 — Normalizer: units, currency, percentage, confidence, alias, dedup
 # ============================================================================
@@ -362,6 +412,25 @@ def test_store_to_atoms_block_bridges_into_ledger_builder_unchanged():
     assert built.errors == ()
     report = qc.verify_ledger(built.markdown)
     assert report.passed, [d.message for d in report.defects]
+
+
+def test_store_to_atoms_block_bridges_an_unknown_atom_into_ledger_builder():
+    """Real bug, found while adding the `unknown` kind: `_to_atom_row` fell
+    into the fact/assumption branch for any non-derived type, emitting
+    `"value": null, "source": null` for an unknown atom — which then failed
+    ledger_builder's own 'must state source' check on round-trip, even though
+    the analyst-level schema itself parsed the atom just fine. Fixed by
+    mapping the schema's `description` field to ledger_builder's expected
+    `source` field specifically for `unknown` atoms."""
+    r = es.parse_evidence_block(_block(REVENUE, UNKNOWN), "oa")
+    assert r.errors == ()
+    normalized = en.normalize(list(r.atoms))
+    store = est.build_store(list(normalized.atoms))
+    recon = "## Reconciliation\n\n```atoms\n" + store.to_atoms_block() + "\n```\n"
+    built = lb.build_from_markdown(recon)
+    assert built.errors == (), built.errors
+    assert built.unknowns == ("Factory utilization by plant",)
+    assert qc.verify_ledger(built.markdown).passed
 
 
 def test_store_conflicting_key_surfaces_as_dangling_ref_for_em_to_resolve():

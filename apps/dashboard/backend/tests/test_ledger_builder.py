@@ -67,6 +67,58 @@ def test_atoms_build_a_passing_ledger():
     assert report.passed, [d.message for d in report.defects]
 
 
+UNKNOWN = (
+    '{"key":"factory_util","kind":"unknown","label":"Factory utilization by '
+    'plant","unit":"RATIO","source":"needs plant-level OEE reports"}'
+)
+
+
+def test_unknown_atom_is_excluded_from_the_ledger_not_given_an_id():
+    """An `unknown` atom carries no value — it must never become an A-n/D-n
+    ledger entry (that would silently turn 'we don't know' into a number)."""
+    result = lb.build_from_markdown(_atoms(REVENUE, UNKNOWN))
+    assert result.had_atoms and result.errors == ()
+    assert result.unknowns == ("Factory utilization by plant",)
+    entries = _entries(result.markdown)
+    assert list(entries) == ["A1"]  # only REVENUE got an id; UNKNOWN did not
+    assert qc.verify_ledger(result.markdown).passed
+
+
+def test_unknown_atom_with_a_value_is_rejected():
+    guessing = UNKNOWN[:-1] + ',"value":0.62}'
+    result = lb.build_from_markdown(_atoms(REVENUE, guessing))
+    assert result.errors and "must not carry a 'value'" in result.errors[0]
+
+
+def test_unknown_atom_with_an_expr_is_rejected():
+    computing = UNKNOWN[:-1] + ',"expr":"revenue * 2"}'
+    result = lb.build_from_markdown(_atoms(REVENUE, computing))
+    assert result.errors and "must not carry an 'expr'" in result.errors[0]
+
+
+def test_unknown_atom_with_a_band_is_rejected():
+    banded = UNKNOWN[:-1] + ',"low":0.5,"high":0.7}'
+    result = lb.build_from_markdown(_atoms(REVENUE, banded))
+    assert result.errors and "must not carry 'low'/'high'" in result.errors[0]
+
+
+def test_unknown_atom_without_source_is_rejected():
+    no_source = UNKNOWN.replace(',"source":"needs plant-level OEE reports"', "")
+    result = lb.build_from_markdown(_atoms(REVENUE, no_source))
+    assert result.errors and "must state 'source'" in result.errors[0]
+
+
+def test_derived_atom_cannot_reference_an_unknown_atoms_key():
+    """An unknown atom's key is never minted an id, so any derived atom
+    referencing it fails the existing dangling-reference check — for free."""
+    references_unknown = (
+        '{"key":"shortfall","kind":"derived","label":"Shortfall",'
+        '"unit":"EUR_M","expr":"revenue - factory_util"}'
+    )
+    result = lb.build_from_markdown(_atoms(REVENUE, UNKNOWN, references_unknown))
+    assert result.errors and "unknown atom key" in result.errors[0]
+
+
 def test_keys_are_translated_to_canonical_ids():
     result = lb.build_from_markdown(_atoms(REVENUE, SHARE, COMMISSION, DRAIN))
     entries = _entries(result.markdown)

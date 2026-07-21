@@ -52,7 +52,7 @@ _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _ATOMS_BLOCK_RE = re.compile(r"```atoms\s*\n(.*?)```", re.S)
 _QUANT_BLOCK_RE = re.compile(r"```quant\s*\n.*?```", re.S)
 
-_KINDS = ("fact", "assumption", "derived")
+_KINDS = ("fact", "assumption", "derived", "unknown")
 
 
 @dataclass(frozen=True)
@@ -63,12 +63,18 @@ class BuildResult:
     ``quant`` block appended (and any prior one stripped). ``errors`` are exact,
     actionable messages for the rework loop — empty on success. ``had_atoms`` is
     False when there was nothing to build (no ``atoms`` block), in which case the
-    input passes through unchanged.
+    input passes through unchanged. ``unknowns`` are the labels of any ``kind:
+    unknown`` atoms in this reconciliation — a metric the EM explicitly
+    declared could not be determined (not estimated, not guessed) — for the
+    Recommendation Gate (quantcheck.unresolved_unknowns) to check the final
+    report surfaces rather than silently drops each one. Empty by default;
+    additive field, no existing caller needs to change.
     """
 
     markdown: str
     errors: tuple[str, ...]
     had_atoms: bool
+    unknowns: tuple[str, ...] = ()
 
 
 @dataclass
@@ -107,41 +113,58 @@ def build_from_markdown(reconciliation: str) -> BuildResult:
     if not blocks:
         return BuildResult(reconciliation, (), had_atoms=False)
 
-    block, errors = _build_block(blocks[-1])
+    block, errors, unknowns = _build_block(blocks[-1])
     if errors:
         return BuildResult(reconciliation, tuple(errors), had_atoms=True)
 
     # Strip any LLM-authored quant block; append the deterministic one.
     body = _QUANT_BLOCK_RE.sub("", reconciliation).rstrip()
     rebuilt = f"{body}\n\n```quant\n{block}\n```\n"
-    return BuildResult(rebuilt, (), had_atoms=True)
+    return BuildResult(rebuilt, (), had_atoms=True, unknowns=tuple(unknowns))
 
 
-def _build_block(raw: str) -> tuple[str, list[str]]:
+def _build_block(raw: str) -> tuple[str, list[str], list[str]]:
     """Parse atoms JSON → emit the quant-ledger JSON block (or errors)."""
     try:
         data = json.loads(raw, parse_float=Decimal, parse_int=Decimal)
     except json.JSONDecodeError as exc:
-        return "", [
-            f"atoms block is not valid JSON: {exc.msg} at line {exc.lineno}, "
-            f"column {exc.colno}. Emit a single JSON array of atom objects."
-        ]
+        return (
+            "",
+            [
+                f"atoms block is not valid JSON: {exc.msg} at line {exc.lineno}, "
+                f"column {exc.colno}. Emit a single JSON array of atom objects."
+            ],
+            [],
+        )
     if isinstance(data, dict):
         data = data.get("atoms")
     if not isinstance(data, list) or not data:
-        return "", [
-            "atoms block must be a non-empty JSON array of atom objects "
-            '(or {"atoms": [...]}).'
-        ]
+        return (
+            "",
+            [
+                "atoms block must be a non-empty JSON array of atom objects "
+                '(or {"atoms": [...]}).'
+            ],
+            [],
+        )
 
     atoms, errors = _parse_atoms(data)
     if errors:
-        return "", errors
+        return "", errors, []
+
+    # `unknown` atoms are excluded from the numeric ledger entirely (they
+    # carry no value): no A-n/D-n id, no entry in `values`. They cannot be
+    # referenced by a derived atom's expr either — that already fails, for
+    # free, via the existing "expr references unknown atom key(s)" check in
+    # _derived_entry below, since an unknown atom's key is never added to
+    # key_to_id.
+    unknown_labels = [a.label for a in atoms if a.kind == "unknown"]
+    atoms = [a for a in atoms if a.kind != "unknown"]
 
     by_key = {a.key: a for a in atoms}
     order, cycle_err = _topo_order(atoms, by_key)
     if cycle_err:
-        return "", cycle_err
+        return "", cycle_err, []
 
     # Canonical ids: facts/assumptions get A-n, derived get D-n, both in the
     # atoms' declared order so ids are stable and human-readable.
@@ -172,10 +195,10 @@ def _build_block(raw: str) -> tuple[str, list[str]]:
             continue
         entry, err = _derived_entry(atom, key_to_id, values)
         if err:
-            return "", [err]
+            return "", [err], []
         entries.append(entry)
 
-    return dump_decimal_json(entries), []
+    return dump_decimal_json(entries), [], unknown_labels
 
 
 def _parse_atoms(data: list[object]) -> tuple[list[_Atom], list[str]]:
@@ -243,6 +266,32 @@ def _validate_atom(atom: _Atom) -> str | None:
             return (
                 f"{atom.key}: a derived atom needs an 'expr' over other atom keys "
                 "(its value is computed for you — do not state one)."
+            )
+        return None
+    if atom.kind == "unknown":
+        # Explicitly "this could not be determined" — never a value, never a
+        # guess, never an expr. Distinct from an `assumption` (a reasoned
+        # estimate with a plausibility band): an `unknown` atom is for the
+        # case where NO reasonable estimate exists at all.
+        if atom.value is not None:
+            return (
+                f"{atom.key}: an unknown atom must not carry a 'value' — "
+                "that would make it a guess, not an unknown."
+            )
+        if atom.expr:
+            return (
+                f"{atom.key}: an unknown atom must not carry an 'expr' — "
+                "nothing computes an unknown value."
+            )
+        if atom.low is not None or atom.high is not None:
+            return (
+                f"{atom.key}: an unknown atom must not carry 'low'/'high' — a "
+                "plausibility band belongs to an assumption, not an unknown."
+            )
+        if not atom.source:
+            return (
+                f"{atom.key}: an unknown atom must state 'source' — what "
+                "additional analysis or data would resolve it."
             )
         return None
     # fact / assumption

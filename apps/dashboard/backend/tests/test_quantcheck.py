@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import os
 
+import pytest
+
 os.environ.setdefault("STRATAGENT_MOCK", "1")
 
 from app import config, db
@@ -398,6 +400,116 @@ def test_tie_out_scales_percent_and_billions():
     assert not quantcheck.tie_out(bad, verified.entries, case).passed
 
 
+def test_tie_out_matches_a_negative_ledger_value():
+    """2026-07-21 real-engagement finding: a correctly-cited negative ledger
+    value (ROIC = -4%) was flagged as an "orphan number". Root cause: the
+    number-matching regex had no sign group at all, so "-4%" and "4%" parsed
+    to the identical positive Decimal — a negative ledger entry could never
+    tie out against its own correct citation, regardless of unit/scale. Fixed
+    by capturing a leading -/−/– as a sign, but only when it is not itself
+    preceded by a digit (so a range like "62-75%" still tokenizes as two
+    positive numbers, not a false negative)."""
+    verified = quantcheck.verify_ledger(
+        _ledger(
+            '{"id":"R1","kind":"assumption","label":"Aggregate ROIC for new '
+            'initiatives","value":-0.04,"unit":"RATIO","basis":"annual",'
+            '"source":"analyst_estimate","low":-0.10,"high":0.0}'
+        )
+    )
+    assert verified.passed
+
+    correctly_cited = "New initiatives deliver -4% ROIC against WACC. [R1]"
+    assert quantcheck.tie_out(correctly_cited, verified.entries, "").passed
+
+    # The en-dash variant an LLM commonly emits for a negative figure.
+    en_dash_cited = "New initiatives now deliver ROIC of –4%. [R1]"
+    assert quantcheck.tie_out(en_dash_cited, verified.entries, "").passed
+
+    # A genuinely wrong sign must still fail — this is not a blanket pass.
+    wrong_sign = "New initiatives deliver +4% ROIC against WACC. [R1]"
+    assert not quantcheck.tie_out(wrong_sign, verified.entries, "").passed
+
+    # Range separator: the hyphen is digit-adjacent, never a sign — "75%" (the
+    # only half of the range with a material suffix) must be flagged as a
+    # plain positive orphan, not skipped or mistaken for "-75%".
+    unrelated_range = "Utilization sits at 62-75% across the network."
+    range_report = quantcheck.tie_out(unrelated_range, verified.entries, "")
+    assert not range_report.passed
+    assert "orphan number 75 %" in range_report.defects[0].message
+
+
+@pytest.mark.parametrize(
+    ("report_figure", "ledger_value", "ledger_unit", "low", "high"),
+    [
+        ("-4%", "-0.04", "RATIO", "-1", "1"),  # negative ROIC
+        ("-12.5%", "-0.125", "RATIO", "-1", "1"),  # negative margin, decimals
+        ("€-35M", "-35", "EUR_M", "-100", "0"),  # currency, sign after symbol
+        ("–4%", "-0.04", "RATIO", "-1", "1"),  # en-dash (common LLM output)
+        ("-€120M", "-120", "EUR_M", "-200", "0"),  # sign before symbol
+        ("-8.75%", "-0.0875", "RATIO", "-1", "1"),  # negative growth rate
+    ],
+)
+def test_signed_numbers_reconcile_across_currency_ratio_and_decimal_forms(
+    report_figure, ledger_value, ledger_unit, low, high
+):
+    """Phase 1 regression matrix (2026-07-21 remediation): every signed form
+    a report might state — plain percent, decimal-precision percent, currency
+    before/after the sign, and the en-dash an LLM commonly substitutes for a
+    hyphen — must reconcile against its ledger value. Positive values and
+    ratios/decimals are covered by the existing suite; this pins the negative
+    forms specifically, since the sign-drop bug affected negatives only."""
+    verified = quantcheck.verify_ledger(
+        _ledger(
+            f'{{"id":"N1","kind":"assumption","label":"Signed test value",'
+            f'"value":{ledger_value},"unit":"{ledger_unit}","basis":"annual",'
+            f'"source":"analyst_estimate","low":{low},"high":{high}}}'
+        )
+    )
+    assert verified.passed
+    report = f"The figure is {report_figure}. [N1]"
+    result = quantcheck.tie_out(report, verified.entries, "")
+    assert result.passed, [d.message for d in result.defects]
+
+
+def test_bare_negative_decimal_with_no_currency_or_suffix_is_not_material():
+    """A bare "-0.04" with no %, currency, or comma is prose structure by the
+    SAME pre-existing rule that already exempts a bare positive number (e.g.
+    "3 options") — unrelated to the sign fix, confirmed here so it is not
+    mistaken for a regression: it is unchanged, intentional behavior. Stated
+    as -4% (the form the ledger's RATIO unit would actually appear in prose),
+    it reconciles correctly, per the parametrized test above."""
+    assert quantcheck._report_numbers("The internal figure was -0.04.") == []
+
+
+def test_unresolved_unknowns_ignores_a_label_never_discussed():
+    report = "This report is entirely about pricing strategy."
+    result = quantcheck.unresolved_unknowns(report, ("Factory utilization",))
+    assert result.passed
+
+
+def test_unresolved_unknowns_flags_a_discussed_unknown_without_framing():
+    report = "We recommend consolidation because factory utilization is low."
+    result = quantcheck.unresolved_unknowns(report, ("factory utilization",))
+    assert not result.passed
+    assert result.defects[0].check == "unknown_evidence"
+    assert "factory utilization" in result.defects[0].message
+
+
+def test_unresolved_unknowns_passes_when_framed_as_evidence_insufficient():
+    report = (
+        "Factory utilization: Evidence Insufficient — recommend a "
+        "plant-level utilization study before acting."
+    )
+    result = quantcheck.unresolved_unknowns(report, ("factory utilization",))
+    assert result.passed
+
+
+def test_unresolved_unknowns_is_a_noop_with_no_unknowns():
+    result = quantcheck.unresolved_unknowns("Anything at all.", ())
+    assert result.passed
+    assert result.defects == ()
+
+
 # --- pipeline integration -----------------------------------------------------------
 
 
@@ -486,6 +598,38 @@ def test_tie_out_reworks_orphan_number_then_passes(tmp_path, monkeypatch):
     assert report_calls["n"] == 2
     engagement = db.get_engagement(eid)
     assert "21.06" not in engagement["report_md"]
+    completed = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
+    )
+    assert completed["payload"]["review_ready"] is True
+    db.reset_for_tests()
+
+
+def test_tie_out_rework_loop_honours_a_raised_max_rework(tmp_path, monkeypatch):
+    """2026-07-21 finding: the tie-out rework was exactly one hardcoded retry,
+    regardless of config.MAX_REWORK — a live engagement where the first retry
+    only partially fixed the orphan list shipped as failed with no further
+    chance to converge. Now bounded by MAX_REWORK like the ledger-fix loop:
+    raising it to 2 must grant a second retry (3 total report-writer calls),
+    and the engagement converges on the attempt the ledger-fix budget alone
+    would not have reached."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "tieout_maxrework.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 2)
+    db.reset_for_tests()
+    report_calls = {"n": 0}
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "report-writer":
+            report_calls["n"] += 1
+            if report_calls["n"] <= 2:
+                return "Final report: uplift €21.06M on $800M revenue."
+            return "Final report: uplift €8M on $800M revenue."
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    assert report_calls["n"] == 3  # initial + 2 reworks, not capped at 1
     completed = next(
         e for e in db.list_events(eid) if e["type"] == "engagement_completed"
     )

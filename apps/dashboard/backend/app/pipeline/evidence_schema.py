@@ -37,7 +37,7 @@ SCHEMA_VERSION = 1
 _SLUG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 CATEGORIES = ("financial", "market", "operational", "strategic", "risk", "general")
-TYPES = ("fact", "assumption", "derived")
+TYPES = ("fact", "assumption", "derived", "unknown")
 CONFIDENCE_LEVELS = ("high", "medium", "low")
 SOURCE_TYPES = ("client_fact", "benchmark", "analyst_estimate", "external_research")
 VALIDATION_STATES = ("unvalidated", "normalized", "validated", "rejected")
@@ -270,6 +270,31 @@ def _parse_one(
             return None, (
                 f"{tag} ({atom_id}): formula {formula!r} references no other "
                 "atom — a constant belongs on a fact, not a derived atom."
+            )
+    elif kind == "unknown":
+        # Explicitly "this could not be determined" — distinct from an
+        # `assumption` (a reasoned estimate with a plausibility band): an
+        # `unknown` atom carries no value, no formula, no band, ever. Never a
+        # guess dressed up as a number.
+        if value is not None:
+            return None, (
+                f"{tag} ({atom_id}): an unknown atom must not carry 'value' — "
+                "that would make it a guess, not an unknown."
+            )
+        if formula is not None:
+            return None, (
+                f"{tag} ({atom_id}): an unknown atom must not carry 'formula' — "
+                "nothing computes an unknown value."
+            )
+        if low is not None or high is not None:
+            return None, (
+                f"{tag} ({atom_id}): an unknown atom must not carry 'low'/'high' "
+                "— a plausibility band belongs to an assumption, not an unknown."
+            )
+        if not description.strip():
+            return None, (
+                f"{tag} ({atom_id}): an unknown atom must state 'description' "
+                "— what additional analysis or data would resolve it."
             )
     else:
         if formula is not None:
