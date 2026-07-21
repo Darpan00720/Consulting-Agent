@@ -504,6 +504,18 @@ async def _run_engagement(
     analyst_cache: dict[str, str] = _completed_analyst_outputs(engagement_id)
     resuming = bool(done or analyst_cache)
 
+    # Every max_tokens literal below was sized for the free-tier pooled
+    # providers' rate limits, not for analysis depth. A BYOK run never
+    # touches that pooled chain, so scale its budgets up instead of making a
+    # premium key think under a free-tier ceiling. The free/demo path below
+    # is untouched — _budget(n) is a no-op when byok is False.
+    byok = bool(api_key)
+
+    def _budget(base_tokens: int) -> int:
+        if not byok:
+            return base_tokens
+        return round(base_tokens * config.BYOK_TOKEN_MULTIPLIER)
+
     db.set_engagement_status(engagement_id, "running")
     if resuming:
         await _emit(
@@ -598,7 +610,7 @@ async def _run_engagement(
                 else ""
             ),
             images=images,
-            max_tokens=2000,
+            max_tokens=_budget(2000),
         )
 
         outputs["gap_analysis"] = await phase(
@@ -617,7 +629,7 @@ async def _run_engagement(
             "band you cannot defend against a benchmark is an OPEN gap; say so "
             "explicitly instead of adopting it.",
             images=images,
-            max_tokens=2000,
+            max_tokens=_budget(2000),
         )
 
         # ADR-014 Phase 2: an optional, feature-flagged reference section for
@@ -643,7 +655,7 @@ async def _run_engagement(
             + _section("Information gaps & assumption ledger", outputs["gap_analysis"])
             + organization_layer_section
             + "\n\nProduce the engagement plan.",
-            max_tokens=1500,
+            max_tokens=_budget(1500),
         )
 
         # ADR-014 Phase 1: an optional, feature-flagged second reference
@@ -676,7 +688,7 @@ async def _run_engagement(
             + "\n\nSelect and adapt the primary and supporting frameworks from the "
             "index above. Name each selected framework exactly as it appears in "
             "the index.",
-            max_tokens=1500,
+            max_tokens=_budget(1500),
         )
 
         # Retrieval: pull the FULL vault notes for the frameworks the selector
@@ -732,7 +744,7 @@ async def _run_engagement(
             "Assign each branch to the most appropriate owner; the market-analyst owns "
             "commercial-capability and go-to-market branches, not just market sizing.",
             images=images,
-            max_tokens=3000,
+            max_tokens=_budget(3000),
         )
 
         # --- analysis: five specialists in SEQUENTIAL order -------------------
@@ -823,7 +835,7 @@ async def _run_engagement(
                     api_key=api_key,
                     model=model,
                     images=images,
-                    max_tokens=2000,
+                    max_tokens=_budget(2000),
                 )
             await _emit(
                 engagement_id,
@@ -941,7 +953,7 @@ async def _run_engagement(
             "figure two analysts defined differently into ONE authoritative value.",
             system_override=ENGAGEMENT_MANAGER_SYSTEM,
             checkpoint=False,  # governance re-runs on resume (cheap; analysts cached)
-            max_tokens=3500,
+            max_tokens=_budget(3500),
         )
 
         # --- Quant Gate (ADR-009): deterministic math verification -----------
@@ -1041,7 +1053,7 @@ async def _run_engagement(
                     "applied.",
                     system_override=ENGAGEMENT_MANAGER_SYSTEM,
                     checkpoint=False,
-                    max_tokens=6000,
+                    max_tokens=_budget(6000),
                 )
                 canonical, verdict = _build_and_verify(canonical)
             await _emit(
@@ -1161,7 +1173,7 @@ async def _run_engagement(
                 )
                 + " Verdict: approved / needs_rework.",
                 checkpoint=False,
-                max_tokens=2000,
+                max_tokens=_budget(2000),
                 # Governance outcome rides this span's terminal event: the
                 # core's quality_analytics reads metadata["verdict"] off
                 # terminal REVIEW events to compute reviewer_pass_rate.
@@ -1198,7 +1210,7 @@ async def _run_engagement(
                 "assumption, expr for a derived one).",
                 system_override=ENGAGEMENT_MANAGER_SYSTEM,
                 checkpoint=False,
-                max_tokens=6000,
+                max_tokens=_budget(6000),
             )
             # A reviewer-driven rework may have altered figures — the quant
             # gate re-verifies (and deterministically repairs, within budget)
@@ -1274,7 +1286,7 @@ async def _run_engagement(
             "End with exactly one line: `VERDICT: stands` or "
             "`VERDICT: stands_with_caveats` or `VERDICT: needs_rework`.",
             checkpoint=False,
-            max_tokens=2000,
+            max_tokens=_budget(2000),
             signals=lambda text: {
                 "verdict": _challenger_verdict(text),
                 "validation_status": (
@@ -1334,7 +1346,7 @@ async def _run_engagement(
                     ),
                 )
 
-        report_budget = (
+        report_budget = _budget(
             config.REPORT_MAX_TOKENS
             + 220 * len(prompts.explicit_questions(case_prompt))
             if asked

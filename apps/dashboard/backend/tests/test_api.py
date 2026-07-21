@@ -769,6 +769,53 @@ def test_case_prompt_has_no_artificial_length_cap(client, monkeypatch):
     assert resp.status_code == 202
 
 
+def test_byok_scales_every_phase_token_budget(tmp_path, monkeypatch):
+    """2026-07-21: every max_tokens literal in engine.py was sized to survive
+    the free-tier pooled providers' rate limits (e.g. Groq's 6k TPM bucket),
+    not to cap analysis depth — and applied identically even when a user
+    brings a premium BYOK key, so a BYOK run got a smarter model thinking
+    inside the same free-tier-sized box. Fixed via engine.py's `_budget()`
+    helper: a BYOK run (api_key set) scales every phase's token budget by
+    config.BYOK_TOKEN_MULTIPLIER; a free-tier run is untouched. Asserts both
+    halves from actual captured call kwargs across a full engagement run,
+    not just the helper in isolation."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "byok-budget.db")
+    db.reset_for_tests()
+
+    def _make_call():
+        seen: dict[str, int] = {}
+
+        async def fake_call(agent, system, user, *, max_tokens=None, **kw):
+            seen[agent] = max_tokens
+            return fake_output(agent)
+
+        return fake_call, seen
+
+    free_call, free_seen = _make_call()
+    eid_free = db.create_engagement("browser-free-budget", CASE)
+    asyncio.run(run_engagement(eid_free, CASE, call=free_call))
+
+    byok_call, byok_seen = _make_call()
+    eid_byok = db.create_engagement("browser-byok-budget", CASE)
+    asyncio.run(
+        run_engagement(
+            eid_byok, CASE, call=byok_call, api_key="sk-ant-fake-test-key-00000000"
+        )
+    )
+
+    # "reflector" (the post-completion learning step) never set max_tokens at
+    # either site — it isn't part of the analysis/report budget contract this
+    # test covers, so it's excluded rather than asserted on.
+    budgeted = {a: t for a, t in free_seen.items() if t is not None}
+    assert budgeted  # sanity: the run actually made budgeted calls to assert against
+    for agent, free_tokens in budgeted.items():
+        expected = round(free_tokens * config.BYOK_TOKEN_MULTIPLIER)
+        assert byok_seen[agent] == expected, (
+            f"{agent}: free={free_tokens} byok={byok_seen[agent]} expected={expected}"
+        )
+    db.reset_for_tests()
+
+
 def test_aggregate_payload_ceiling(client):
     """Per-field caps allow ~42 MB in aggregate; the whole-request ceiling must
     reject that so one request can't pin memory or starve concurrent runs.

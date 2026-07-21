@@ -61,6 +61,15 @@ MODEL = "auto"
 MAX_TOKENS = int(_env("STRATAGENT_MAX_TOKENS", "4096"))
 REPORT_MAX_TOKENS = int(_env("STRATAGENT_REPORT_MAX_TOKENS", "8192"))
 
+# 2026-07-21: every per-phase token budget in engine.py was sized to survive
+# the FREE-TIER pooled providers' rate limits (e.g. Groq's 6 000 TPM bucket) —
+# not to cap how deep an analysis can go. A BYOK run bypasses that pooled
+# chain entirely (call_with_failover routes it to the user's own provider
+# only), so there is no rate-limit reason to keep it that tight. This
+# multiplier scales every phase's max_tokens up for BYOK runs only; the
+# free-tier/demo path is completely unaffected.
+BYOK_TOKEN_MULTIPLIER = float(_env("STRATAGENT_BYOK_TOKEN_MULTIPLIER", "3"))
+
 # Local model via Ollama (pipeline/providers.py, docs/operations/
 # Ollama-Local-Runtime.md). Opt-in and additive — the cloud chain is unchanged
 # when this is off. A local model is a weak analyst, so the default placement is
