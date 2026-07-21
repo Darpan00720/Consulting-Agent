@@ -62,12 +62,25 @@ def pipeline_fake_output():
     """Default fake agent output for ``run_engagement()``-driven tests:
     parseable verdicts for governance agents and a valid quant ledger for
     the engagement manager. Returns the output function itself — call it as
-    ``pipeline_fake_output(agent_name)``."""
+    ``pipeline_fake_output(agent_name)``.
+
+    2026-07-21 fix: this fixture's own docstring always claimed "a valid
+    quant ledger", but the block was shaped {"facts": [...], "derived": []}
+    — quantcheck.verify_ledger expects a flat JSON array (or
+    {"entries": [...]}), so this never actually verified; it silently
+    produced quant.entries=None every time any test used it. That went
+    unnoticed because the old architecture let an engagement complete
+    regardless. The 2026-07-21 orchestration hardening now terminates an
+    engagement early when quant.entries is None after the EM's rework budget
+    is exhausted (the correct behavior for a genuinely absent ledger — see
+    EngagementManagerValidationError) — which made this pre-existing fixture
+    bug newly consequential for every caller expecting status="completed".
+    Fixed at the source (the shared fixture), not patched per test."""
     quant_block = """
 
 ```quant
-{"facts": [{"id": "A-1", "label": "revenue", "value": 800000000, "unit": "usd"}],
-"derived": []}
+[{"id": "A1", "kind": "fact", "label": "revenue", "value": 800000000,
+"unit": "USD", "basis": "annual", "source": "case: revenue"}]
 ```"""
 
     def _fake_output(agent: str) -> str:

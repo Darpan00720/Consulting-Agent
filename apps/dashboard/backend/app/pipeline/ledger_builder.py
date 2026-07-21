@@ -41,6 +41,8 @@ from decimal import Decimal, InvalidOperation
 # Tightly-coupled sibling module: reuse the verifier's validated formula parser
 # and evaluator so "the arithmetic" is defined in exactly one place.
 from app.pipeline.quantcheck import (
+    CRITICALITIES,
+    DEFAULT_CRITICALITY,
     _eval,
     _formula_ids,
     _FormulaError,
@@ -91,6 +93,7 @@ class _Atom:
     expr: str | None
     anchor: str | None
     bridge: bool
+    criticality: str | None = None  # assumption-only; see _validate_atom
 
 
 def build_from_markdown(reconciliation: str) -> BuildResult:
@@ -240,6 +243,11 @@ def _parse_atoms(data: list[object]) -> tuple[list[_Atom], list[str]]:
             expr=expr if isinstance(expr, str) and expr.strip() else None,
             anchor=(raw.get("anchor") if isinstance(raw.get("anchor"), str) else None),
             bridge=raw.get("bridge") is True,
+            criticality=(
+                raw.get("criticality")
+                if isinstance(raw.get("criticality"), str)
+                else None
+            ),
         )
 
         per_kind = _validate_atom(atom)
@@ -306,6 +314,23 @@ def _validate_atom(atom: _Atom) -> str | None:
         )
     if atom.kind == "assumption" and (atom.low is None or atom.high is None):
         return f"{atom.key}: an assumption must declare a 'low'/'high' band."
+    if atom.kind == "assumption":
+        # Criticality (2026-07-21, Issue 3): how much a recommendation
+        # depends on this specific assumption being right. Optional for
+        # backward compatibility (existing atoms/tests never declared it) --
+        # defaults to "material", the safe middle ground: still permits a
+        # recommendation (unlike load_bearing) but is never silently treated
+        # as harmless (unlike supporting), so an unclassified assumption
+        # never slips through as if it were the least consequential kind.
+        if atom.criticality is None:
+            atom.criticality = DEFAULT_CRITICALITY
+        elif atom.criticality not in CRITICALITIES:
+            return (
+                f"{atom.key}: 'criticality' must be one of {CRITICALITIES}, "
+                f"got {atom.criticality!r}."
+            )
+    elif atom.criticality is not None:
+        return f"{atom.key}: only an assumption may carry 'criticality'."
     return None
 
 
@@ -329,6 +354,7 @@ def _atoms_conflict(a: _Atom, b: _Atom) -> bool:
         a.high,
         a.anchor,
         a.bridge,
+        a.criticality,
     ) != (
         b.kind,
         b.unit,
@@ -339,6 +365,7 @@ def _atoms_conflict(a: _Atom, b: _Atom) -> bool:
         b.high,
         b.anchor,
         b.bridge,
+        b.criticality,
     )
 
 
@@ -355,6 +382,7 @@ def _leaf_entry(atom: _Atom, entry_id: str) -> dict[str, object]:
     if atom.kind == "assumption":
         entry["low"] = atom.low
         entry["high"] = atom.high
+        entry["criticality"] = atom.criticality
     return entry
 
 

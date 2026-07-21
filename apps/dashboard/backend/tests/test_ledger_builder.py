@@ -129,6 +129,44 @@ def test_keys_are_translated_to_canonical_ids():
     assert isinstance(entries["A1"]["value"], int)
 
 
+# --- assumption criticality (Issue 3, 2026-07-21) ----------------------------
+
+
+def test_assumption_criticality_defaults_to_material_when_omitted():
+    """SHARE never declares 'criticality' -- 2026-07-21 backward-compat
+    default applies so pre-existing atoms (and every test fixture written
+    before this feature) never silently become the least-consequential kind."""
+    result = lb.build_from_markdown(_atoms(REVENUE, SHARE, COMMISSION, DRAIN))
+    entries = _entries(result.markdown)
+    assert entries["A2"]["criticality"] == "material"
+    assert entries["A3"]["criticality"] == "material"
+    assert "criticality" not in entries["A1"]  # a fact never carries it
+
+
+def test_assumption_criticality_explicit_value_is_preserved():
+    load_bearing = SHARE[:-1] + ',"criticality":"load_bearing"}'
+    result = lb.build_from_markdown(_atoms(REVENUE, load_bearing, COMMISSION, DRAIN))
+    entries = _entries(result.markdown)
+    assert entries["A2"]["criticality"] == "load_bearing"
+
+
+def test_assumption_criticality_rejects_an_invalid_value():
+    bad = SHARE[:-1] + ',"criticality":"vital"}'
+    result = lb.build_from_markdown(_atoms(REVENUE, bad, COMMISSION, DRAIN))
+    assert result.errors and "must be one of" in result.errors[0]
+
+
+def test_fact_cannot_carry_criticality():
+    fact_with_criticality = REVENUE[:-1] + ',"criticality":"supporting"}'
+    result = lb.build_from_markdown(
+        _atoms(fact_with_criticality, SHARE, COMMISSION, DRAIN)
+    )
+    assert (
+        result.errors
+        and "only an assumption may carry 'criticality'" in result.errors[0]
+    )
+
+
 def test_derived_value_is_computed_not_trusted():
     """The whole point: the LLM cannot inject a wrong calculation. Even if a
     derived atom carries a bogus value, the builder recomputes it and the gate

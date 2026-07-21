@@ -43,6 +43,38 @@ log = logging.getLogger(__name__)
 CallAgent = Callable[..., Awaitable[str]]
 
 
+class EngagementManagerValidationError(RuntimeError):
+    """The Engagement Manager never produced a structurally valid canonical
+    reconciliation (no ``atoms``/``quant`` block at all) even after
+    exhausting its rework budget and every provider's failover chain.
+
+    2026-07-21 finding: a severe, sustained Gemini free-tier outage (10+
+    consecutive 503/timeout/rate-limit failures across the whole pooled
+    chain, confirmed in Railway logs) meant whichever provider eventually
+    returned text for the engagement-manager phase did not comply with the
+    "end with an atoms block" instruction, on both the initial call and its
+    one rework attempt. The pipeline correctly detected this (the Quant Gate
+    is not the bug here — it worked), but then continued through reviewer,
+    challenger, and report-writer anyway, spending three more provider calls
+    on a reconciliation known to be unusable, and producing a confusing
+    interim report instead of a clear, fast, honest failure. Raising this
+    stops the engagement immediately once the reconciliation is confirmed
+    structurally unusable (``quant.entries is None`` — the existing,
+    already-precise signal for "no parseable ledger block exists at all",
+    distinct from a ledger that exists but has a content defect, which still
+    deserves the existing "review the substance anyway" treatment).
+    """
+
+
+def _requires_early_termination(quant: quantcheck.QuantReport) -> bool:
+    """True only for a COMPLETELY missing reconciliation artifact — never for
+    a ledger that exists but has some other verified defect (wrong
+    arithmetic, bad units, an out-of-band assumption, ...), which still gets
+    the existing "review the substance so the rework is complete" treatment
+    (engine.py's own long-standing design, unchanged here)."""
+    return not quant.passed and quant.entries is None
+
+
 def _completed_phase_outputs(engagement_id: str) -> dict[str, str]:
     """Reconstruct each completed phase's output from persisted events.
 
@@ -261,7 +293,17 @@ Rules (the builder + verifier enforce these):
 - A ``fact`` is client-stated: give ``value`` and a ``source`` quoting the case.
 - An ``assumption`` needs ``value``, a ``source`` naming where the number would
   come from (POS, CRM, financials, contract, benchmark), and a plausibility band
-  ``low``/``high`` that contains ``value``.
+  ``low``/``high`` that contains ``value``. It also needs ``criticality`` — how
+  much the RECOMMENDATION depends on this specific assumption being right:
+    * ``"supporting"`` — context only; the recommendation stands without it.
+    * ``"material"`` — changes the SIZE of the recommended benefit, not its
+      DIRECTION; disclose the sensitivity, don't hide it.
+    * ``"load_bearing"`` — the recommendation ITSELF flips if this assumption
+      is wrong. Classify honestly: if you are unsure whether an assumption is
+      load-bearing, ask "if this number were the opposite of what I assumed,
+      would I recommend something different?" — if yes, it is load_bearing,
+      not material. Omitting ``criticality`` defaults it to ``"material"`` —
+      never omit it to dodge the load_bearing decision policy below.
 - A ``derived`` atom gives ONLY an ``expr`` over other atom keys, using
   + - * / ** and parentheses. DO NOT give it a ``value`` — the code computes it
   exactly, so you cannot get the arithmetic wrong (and must not try).
@@ -976,6 +1018,14 @@ async def _run_engagement(
             return canonical, verdict
 
         canonical, quant = await quant_verified(canonical)
+        if _requires_early_termination(quant):
+            raise EngagementManagerValidationError(
+                "The Engagement Manager produced no Quant Ledger at all "
+                "after its rework budget and provider failover were "
+                "exhausted — likely a temporary AI provider outage. Stopped "
+                "here rather than reviewing an unusable reconciliation. "
+                "Please try running the engagement again."
+            )
 
         review = ""
         review_verdict = "needs_rework"
@@ -1106,6 +1156,15 @@ async def _run_engagement(
             # gate re-verifies (and deterministically repairs, within budget)
             # so a rework can never trade a judgment fix for broken math.
             canonical, quant = await quant_verified(canonical)
+            if _requires_early_termination(quant):
+                raise EngagementManagerValidationError(
+                    "A reviewer-driven rework left the Engagement Manager "
+                    "with no Quant Ledger at all after the fix budget and "
+                    "provider failover were exhausted — likely a temporary "
+                    "AI provider outage. Stopped here rather than "
+                    "challenging an unusable reconciliation. Please try "
+                    "running the engagement again."
+                )
             await _emit(engagement_id, "rework_completed", {"attempt": attempt + 1})
 
         outputs["analysis"] = render_analysis()
@@ -1124,6 +1183,16 @@ async def _run_engagement(
         # explicitly could not determine. Checked against the finished report
         # below, alongside the tie-out.
         unknown_labels = ledger_builder.build_from_markdown(canonical).unknowns
+        # Decision policy (Issue 3, 2026-07-21): ledger ids whose assumption
+        # is load-bearing — the recommendation itself changes if this specific
+        # assumption turns out wrong, as opposed to "supporting" (survives
+        # without it) or "material" (only changes sizing). Checked against the
+        # finished report's Recommendation section below.
+        load_bearing_ids = tuple(
+            eid
+            for eid, e in (quant.entries or {}).items()
+            if e.kind == "assumption" and e.criticality == "load_bearing"
+        )
 
         challenge = await phase(
             "challenge",
@@ -1304,6 +1373,25 @@ async def _run_engagement(
             "specific analysis needed as a next step. A recommendation may "
             "still stand on the evidence that IS available — this only bars "
             "treating an explicit unknown as if it were settled.\n"
+            "- DECISION POLICY BY EVIDENCE TYPE (machine-enforced on the "
+            "`## Recommendation` section specifically): a fact or a derived "
+            "ledger value permits an unconditional recommendation. A "
+            "supporting assumption permits one with caveats. A material "
+            "assumption permits one but must disclose its sensitivity (the "
+            "assumptions-log Breakeven/Validation columns are how). A "
+            "load_bearing assumption — one where the recommendation ITSELF "
+            "flips if it's wrong — never permits an unconditional "
+            "recommendation: the Recommendation section must instead read "
+            "'this recommendation is contingent upon validation of "
+            "Assumption Ax' or 'Evidence Insufficient', not a bare call to "
+            "action. Avoid unqualified certainty words ('must', "
+            "'absolutely', 'immediately', 'we should') in the Recommendation "
+            "section wherever the underlying support is a load_bearing "
+            "assumption or an unresolved unknown — prefer 'provisionally', "
+            "'subject to validation', 'conditional upon', or 'evidence is "
+            "currently insufficient'. This does not apply to language backed "
+            "by facts, derived values, or supporting/material assumptions — "
+            "do not hedge a genuinely well-supported recommendation.\n"
             "- Use markdown tables for every option comparison and every set of "
             "figures; keep prose tight and decision-oriented (MECE, no hedging beyond "
             "the labeled assumptions).\n"
@@ -1415,6 +1503,13 @@ async def _run_engagement(
         # simple) — a violation joins `unresolved` below exactly like any
         # other gate defect, which already fails the engagement closed.
         unknowns_gate = quantcheck.unresolved_unknowns(report, unknown_labels)
+        # Decision policy gate (Issue 3): a load-bearing assumption may not
+        # drive an unconditional Recommendation. Same "no rework loop of its
+        # own" simplicity as the unknowns gate above — a violation joins
+        # `unresolved` below.
+        policy_gate = quantcheck.load_bearing_recommendation_gate(
+            report, load_bearing_ids
+        )
         # Never re-run report-writer over broken LEDGER math (as opposed to an
         # orphan-number miss) — the EM already exhausted its fix budget; asking
         # report-writer to "fix" arithmetic it didn't produce just burns a
@@ -1423,6 +1518,7 @@ async def _run_engagement(
             (list(quant.defects) if not quant.passed else [])
             + ([] if tie.passed else list(tie.defects))
             + ([] if unknowns_gate.passed else list(unknowns_gate.defects))
+            + ([] if policy_gate.passed else list(policy_gate.defects))
         )
         if unresolved:
             review_ready = False

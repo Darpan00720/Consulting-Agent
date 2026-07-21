@@ -43,6 +43,17 @@ from typing import Any
 
 KINDS = ("fact", "assumption", "derived")
 
+# Assumption criticality (2026-07-21, Issue 3): how much a recommendation
+# depends on this specific assumption being right — orthogonal to kind, and
+# meaningful only for kind="assumption" (a fact needs no such classification;
+# a derived value's criticality is inherited from the assumptions it uses).
+# Optional for backward compatibility; defaults to "material", the safe
+# middle ground — still permits a recommendation (unlike load_bearing) but
+# is never silently treated as harmless (unlike supporting), so an
+# unclassified assumption never slips through as the least consequential kind.
+CRITICALITIES = ("supporting", "material", "load_bearing")
+DEFAULT_CRITICALITY = "material"
+
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _QUANT_BLOCK_RE = re.compile(r"```quant\s*\n(.*?)```", re.S)
 
@@ -78,6 +89,7 @@ class Entry:
     anchor: str | None
     bridge: bool
     inputs: tuple[str, ...]  # ids parsed out of the formula ("" for non-derived)
+    criticality: str | None = None  # assumption-only; one of CRITICALITIES
 
 
 @dataclass(frozen=True)
@@ -370,6 +382,29 @@ def verify_ledger(markdown: str) -> QuantReport:
         low, high = _as_decimal(raw.get("low")), _as_decimal(raw.get("high"))
         anchor = raw.get("anchor")
         bridge = raw.get("bridge") is True
+        criticality = raw.get("criticality")
+        if kind == "assumption":
+            if criticality is None:
+                criticality = DEFAULT_CRITICALITY
+            elif criticality not in CRITICALITIES:
+                defects.append(
+                    QuantDefect(
+                        "schema",
+                        (eid,),
+                        f"{eid}: criticality must be one of {CRITICALITIES}, "
+                        f"got {criticality!r}.",
+                    )
+                )
+                continue
+        elif criticality is not None:
+            defects.append(
+                QuantDefect(
+                    "schema",
+                    (eid,),
+                    f"{eid}: only an assumption may carry criticality.",
+                )
+            )
+            continue
 
         if kind == "derived":
             if not isinstance(formula, str) or not formula.strip():
@@ -449,6 +484,7 @@ def verify_ledger(markdown: str) -> QuantReport:
             anchor=anchor if isinstance(anchor, str) else None,
             bridge=bridge,
             inputs=inputs,
+            criticality=criticality,
         )
 
     # Q2 — reference integrity (+ no-PCT-operand, cycles)
@@ -846,6 +882,70 @@ def unresolved_unknowns(report_md: str, unknown_labels: tuple[str, ...]) -> Quan
                     "an unknown may not be silently treated as resolved. "
                     "Either add that framing next to this discussion or "
                     "remove the claim.",
+                )
+            )
+    return QuantReport(not defects, tuple(defects), None)
+
+
+# --- decision policy gate (Issue 3, 2026-07-21) -------------------------------
+
+_RECOMMENDATION_HEADING = re.compile(r"^##\s+Recommendation\b.*$", re.M)
+_NEXT_H2_HEADING = re.compile(r"^##\s+", re.M)
+_CONDITIONAL_LANGUAGE = re.compile(
+    r"contingent upon|evidence insufficient|subject to validation|"
+    r"provisional|conditional upon",
+    re.I,
+)
+
+
+def load_bearing_recommendation_gate(
+    report_md: str, load_bearing_ids: tuple[str, ...]
+) -> QuantReport:
+    """Decision policy (Issue 3): a recommendation may not rest, unconditionally,
+    on a load-bearing assumption — one where the recommendation itself changes
+    if the assumption turns out wrong (as opposed to "supporting", where the
+    recommendation survives without it, or "material", which only changes
+    sizing). Per the decision policy: Facts and derived values permit an
+    unconditional recommendation; supporting assumptions permit one with
+    caveats; material assumptions require a disclosed sensitivity; a
+    load-bearing assumption requires the recommendation itself to read
+    "contingent upon validation of Assumption Ax" or "Evidence Insufficient"
+    — never a bare, unconditional call to action.
+
+    Scoped to the ``## Recommendation`` section specifically (the report-
+    writer's own mandated heading, per its prompt) — the same load-bearing
+    assumption may be freely discussed and even challenged elsewhere (the
+    Analysis or Risks sections), which is a normal part of showing the work;
+    it is the board-facing DECISION itself, not the whole document, that this
+    policy binds. If the report has no ``## Recommendation`` heading at all,
+    or there are no load-bearing assumptions to check, there is nothing to
+    gate here — a missing Recommendation heading is a report-writer
+    compliance defect for a human/reviewer to catch, not something this
+    function invents an opinion about.
+    """
+    if not load_bearing_ids:
+        return QuantReport(True, (), None)
+    heading = _RECOMMENDATION_HEADING.search(report_md)
+    if heading is None:
+        return QuantReport(True, (), None)
+    next_heading = _NEXT_H2_HEADING.search(report_md, heading.end())
+    section = report_md[heading.end() : next_heading.start() if next_heading else None]
+
+    defects: list[QuantDefect] = []
+    for entry_id in load_bearing_ids:
+        if re.search(
+            rf"\[{re.escape(entry_id)}\b", section
+        ) and not _CONDITIONAL_LANGUAGE.search(section):
+            defects.append(
+                QuantDefect(
+                    "load_bearing_recommendation",
+                    (entry_id,),
+                    f"the Recommendation section cites {entry_id}, a "
+                    "load-bearing assumption (the recommendation itself "
+                    "changes if this turns out wrong), but states it "
+                    "unconditionally — it must instead read 'contingent "
+                    f"upon validation of Assumption {entry_id}' or "
+                    "'Evidence Insufficient', never a bare call to action.",
                 )
             )
     return QuantReport(not defects, tuple(defects), None)

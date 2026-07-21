@@ -510,6 +510,179 @@ def test_unresolved_unknowns_is_a_noop_with_no_unknowns():
     assert result.defects == ()
 
 
+# --- decision policy gate (Issue 3, 2026-07-21) ------------------------------
+
+_RECOMMENDATION_UNCONDITIONAL = (
+    "## Recommendation\n"
+    "Immediately halt capacity expansion based on utilization [A2].\n\n"
+    "## Risks\nSome risk text.\n"
+)
+_RECOMMENDATION_CONDITIONAL = (
+    "## Recommendation\n"
+    "This recommendation is contingent upon validation of Assumption A2.\n\n"
+    "## Risks\nSome risk text.\n"
+)
+
+
+def test_policy_gate_blocks_an_unconditional_load_bearing_recommendation():
+    result = quantcheck.load_bearing_recommendation_gate(
+        _RECOMMENDATION_UNCONDITIONAL, ("A2",)
+    )
+    assert not result.passed
+    assert result.defects[0].check == "load_bearing_recommendation"
+    assert result.defects[0].ids == ("A2",)
+
+
+def test_policy_gate_passes_a_conditioned_load_bearing_recommendation():
+    result = quantcheck.load_bearing_recommendation_gate(
+        _RECOMMENDATION_CONDITIONAL, ("A2",)
+    )
+    assert result.passed
+
+
+@pytest.mark.parametrize(
+    "qualifier",
+    [
+        "This recommendation is contingent upon validation of Assumption A2.",
+        "Evidence Insufficient to finalize this recommendation [A2].",
+        "Recommended, subject to validation of [A2].",
+        "This is a provisional recommendation pending [A2].",
+        "Conditional upon [A2] being confirmed, we recommend X.",
+    ],
+)
+def test_policy_gate_accepts_every_documented_qualifying_phrase(qualifier):
+    report = f"## Recommendation\n{qualifier}\n\n## Risks\ntext\n"
+    result = quantcheck.load_bearing_recommendation_gate(report, ("A2",))
+    assert result.passed, [d.message for d in result.defects]
+
+
+def test_policy_gate_ignores_a_load_bearing_id_never_cited_in_recommendation():
+    """The same load-bearing assumption may be freely discussed in Analysis —
+    the policy binds the board-facing Recommendation section specifically."""
+    report = (
+        "## Analysis\nUtilization [A2] is a key concern.\n\n"
+        "## Recommendation\nDo X based on facts [A1].\n"
+    )
+    result = quantcheck.load_bearing_recommendation_gate(report, ("A2",))
+    assert result.passed
+
+
+def test_policy_gate_is_a_noop_without_a_recommendation_heading():
+    result = quantcheck.load_bearing_recommendation_gate(
+        "No headings at all, just prose citing [A2].", ("A2",)
+    )
+    assert result.passed
+
+
+def test_policy_gate_is_a_noop_with_no_load_bearing_ids():
+    """Facts, derived values, and supporting/material assumptions all permit
+    an unconditional recommendation -- only load_bearing IDs are checked."""
+    result = quantcheck.load_bearing_recommendation_gate(
+        _RECOMMENDATION_UNCONDITIONAL, ()
+    )
+    assert result.passed
+
+
+# --- pipeline integration: decision policy gate + retry-before-termination --
+
+_QUANT_LOAD_BEARING = QUANT.replace(
+    '"low":0.005,"high":0.02}', '"low":0.005,"high":0.02,"criticality":"load_bearing"}'
+)
+
+
+def test_engine_blocks_an_unconditional_recommendation_on_a_load_bearing_assumption(
+    tmp_path, monkeypatch
+):
+    """End-to-end proof the decision policy gate (Issue 3) is actually wired
+    into run_engagement, not just unit-tested in isolation: A1 is
+    load_bearing in the ledger, the report-writer states it unconditionally,
+    and the engagement must complete NOT review-ready."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "policy_block.db")
+    db.reset_for_tests()
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return "reconciliation" + _QUANT_LOAD_BEARING
+        if agent == "report-writer":
+            return (
+                "## Recommendation\nImmediately act on margin uplift [A1].\n\n"
+                "## Risks\ntext\n"
+            )
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "completed"
+    completed = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
+    )
+    assert completed["payload"]["review_ready"] is False
+    db.reset_for_tests()
+
+
+def test_engine_permits_a_conditioned_recommendation_on_a_load_bearing_assumption(
+    tmp_path, monkeypatch
+):
+    """The other half of the proof above: the SAME load-bearing ledger, but a
+    report-writer that correctly conditions the recommendation, must not be
+    blocked by the decision policy gate (though it may still be blocked by
+    other, unrelated gates — this fixture's ledger and report are otherwise
+    clean, so review_ready should be True)."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "policy_pass.db")
+    db.reset_for_tests()
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return "reconciliation" + _QUANT_LOAD_BEARING
+        if agent == "report-writer":
+            return (
+                "## Recommendation\nThis recommendation is contingent upon "
+                "validation of Assumption A1.\n\n## Risks\ntext\n"
+            )
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    completed = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
+    )
+    assert completed["payload"]["review_ready"] is True
+    db.reset_for_tests()
+
+
+def test_engine_manager_retries_before_terminating_on_a_missing_ledger(
+    tmp_path, monkeypatch
+):
+    """Issue 2 resilience requirement: retry within configured limits BEFORE
+    terminating. quant_verified's own budget is (MAX_REWORK + 1) reconcile
+    reworks on top of the one initial reconcile call, so raising MAX_REWORK
+    to 2 must grant 4 total engagement-manager calls before
+    EngagementManagerValidationError fires — proving the early-termination
+    hardening does not skip the existing retry/failover budget, it only acts
+    once that budget is spent."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "retry_before_fail.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 2)
+    db.reset_for_tests()
+    em_calls = {"n": 0}
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            em_calls["n"] += 1
+            return "reconciliation with no ledger at all"
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    assert em_calls["n"] == config.MAX_REWORK + 2  # 1 initial + (MAX_REWORK+1) reworks
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "failed"
+    db.reset_for_tests()
+
+
 # --- pipeline integration -----------------------------------------------------------
 
 
@@ -554,7 +727,11 @@ def test_quant_gate_reworks_planted_error_then_passes(tmp_path, monkeypatch):
 
 def test_quant_gate_fails_closed_without_ledger(tmp_path, monkeypatch):
     """An EM that never produces a ledger exhausts the fix budget and the
-    engagement completes NOT review-ready — never a confident final report."""
+    engagement fails closed — terminated explicitly (2026-07-21 hardening),
+    never a confident final report and never a wasted review/challenge/
+    report-writer pass over nothing. See
+    test_missing_ledger_terminates_the_engagement_instead_of_shipping_a_report
+    for the full scenario this pins the short version of."""
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "quantfail.db")
     monkeypatch.setattr(config, "MAX_REWORK", 1)
     db.reset_for_tests()
@@ -567,10 +744,8 @@ def test_quant_gate_fails_closed_without_ledger(tmp_path, monkeypatch):
     eid = db.create_engagement("browser-x", CASE)
     _drain(run_engagement(eid, CASE, call=fake_call))
 
-    completed = next(
-        e for e in db.list_events(eid) if e["type"] == "engagement_completed"
-    )
-    assert completed["payload"]["review_ready"] is False
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "failed"
     gate_events = [e for e in db.list_events(eid) if e["type"] == "quant_gate"]
     assert gate_events[-1]["payload"]["passed"] is False
     assert "no ```quant ledger block" in gate_events[-1]["payload"]["defects"][0]
@@ -664,44 +839,86 @@ def test_tie_out_fails_closed_and_flags_the_report(tmp_path, monkeypatch):
     db.reset_for_tests()
 
 
-def test_missing_ledger_gets_banner_even_if_report_writer_ignores_it(
+def test_missing_ledger_terminates_the_engagement_instead_of_shipping_a_report(
     tmp_path, monkeypatch
 ):
-    """Live-run regression (2026-07-16): the EM never produced a ```quant
-    block after exhausting its fix budget (quant.entries is None), yet the
-    report-writer — on a real free-tier model — ignored the "write an honest
-    interim memo" instruction and produced a fully confident final-looking
-    report with no visible caveat. The banner must be prepended
-    DETERMINISTICALLY whenever the ledger itself never validated, regardless
-    of whether the report-writer complied — it must never depend on model
-    behavior it cannot control."""
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "missing_ledger_banner.db")
+    """2026-07-21 orchestration hardening, superseding the OLD behavior this
+    test used to pin (an interim report with a "no ledger found" banner):
+    a live Project Atlas engagement hit a severe Gemini free-tier outage
+    (confirmed via Railway logs — 10+ consecutive 503/timeout/rate-limit
+    failures across the whole pooled chain, twice, for the
+    engagement-manager phase specifically) that left the EM's reconciliation
+    with NO atoms/quant block at all, even after its full rework budget.
+
+    The OLD design let this proceed through reviewer, challenger, and
+    report-writer anyway ("still review the substance so the rework is
+    complete") — spending three more provider calls on a reconciliation
+    known to be structurally unusable, and producing a confusing interim
+    report instead of a clear, fast, honest failure. The Quant Gate itself
+    was never the bug (it correctly detected the missing ledger both times);
+    the fix is architectural: when quant.entries is None (nothing at all to
+    review, as opposed to a ledger that exists but has some other verified
+    defect — see test_ledger_with_a_recoverable_defect_still_reaches_report
+    below for that unchanged path), stop immediately rather than continue."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "missing_ledger_stops.db")
     monkeypatch.setattr(config, "MAX_REWORK", 1)
     db.reset_for_tests()
+
+    reviewer_called = {"n": False}
 
     async def fake_call(agent, system, user, **kw):
         if agent == "engagement-manager":
             return "reconciliation with no ledger at all"  # never emits one
-        if agent == "report-writer":
-            # Simulates a non-compliant model: a polished, confident report
-            # with none of the requested "not final" framing.
-            return "## Executive summary\n\nDo X. It will yield €12M in value."
+        if agent == "reviewer":
+            reviewer_called["n"] = True
         return fake_output(agent)
 
     eid = db.create_engagement("browser-x", CASE)
     _drain(run_engagement(eid, CASE, call=fake_call))
 
     engagement = db.get_engagement(eid)
+    assert engagement["status"] == "failed"
+    assert engagement["report_md"] is None
+    assert "provider outage" in engagement["error"] or "Please try running" in (
+        engagement["error"] or ""
+    )
+    # The whole point: three more provider calls (reviewer, challenger,
+    # report-writer) never happen on a reconciliation known to be unusable.
+    assert reviewer_called["n"] is False
+    failed_event = next(
+        e for e in db.list_events(eid) if e["type"] == "engagement_failed"
+    )
+    assert "Please try running the engagement again" in failed_event["payload"]["error"]
+    db.reset_for_tests()
+
+
+def test_ledger_with_a_recoverable_defect_still_reaches_report(tmp_path, monkeypatch):
+    """Regression guard for the hardening above: a ledger that EXISTS but has
+    some other verified defect (wrong arithmetic, in this case) is NOT the
+    "nothing to review" case — quant.entries is a real dict here, just with
+    a Q3 arithmetic defect — so the existing "review the substance so the
+    rework is complete" path must still run unchanged, ending in the
+    existing interim-report banner, not the new early-termination error."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "recoverable_defect.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 1)
+    db.reset_for_tests()
+
+    broken = QUANT.replace('"value":8,', '"value":9,')  # 800 * 0.01 != 9
+
+    async def fake_call(agent, system, user, **kw):
+        if agent == "engagement-manager":
+            return "reconciliation" + broken  # a real, present, but wrong ledger
+        return fake_output(agent)
+
+    eid = db.create_engagement("browser-x", CASE)
+    _drain(run_engagement(eid, CASE, call=fake_call))
+
+    engagement = db.get_engagement(eid)
+    assert engagement["status"] == "completed"  # not "failed" — reached the end
     md = engagement["report_md"]
     assert "NOT BOARD-READY — INTERIM STATUS ONLY" in md
-    assert "no ```quant ledger block found" in md
-    # The MediCore live-run bug (2026-07-17): a failed-gate report still read as
-    # a final Board decision. The banner must deterministically state the true
-    # governance line (quant gate included) and demote the body to provisional.
     assert "quant-gate=FAILED" in md
-    assert "PROVISIONAL" in md
-    # the model's actual content is still there, just flagged, not discarded
-    assert "€12M in value" in md
+    db.reset_for_tests()
     completed = next(
         e for e in db.list_events(eid) if e["type"] == "engagement_completed"
     )
@@ -753,14 +970,23 @@ def test_reflector_sees_quant_gate_defects_not_just_reviewer_notes(
     ledger defects — so the reflector never saw the actual, specific,
     mechanical failure pattern. Assert the reflector's prompt now carries the
     quant-gate defects verbatim whenever the ledger failed, and is told to
-    prioritize ledger-discipline lessons over generic advice."""
+    prioritize ledger-discipline lessons over generic advice.
+
+    Uses a ledger that EXISTS but has a wrong-arithmetic defect, not a
+    totally-missing one — 2026-07-21 hardening now terminates the engagement
+    before the reflector ever runs when there is nothing at all to review
+    (see test_missing_ledger_terminates_the_engagement_instead_of_shipping_a_report);
+    this test's own subject (the reflector learning from a REAL, present,
+    but wrong ledger) is unaffected by that change and still applies."""
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "reflect_quant.db")
+    monkeypatch.setattr(config, "MAX_REWORK", 1)
     db.reset_for_tests()
     reflector_prompts: list[str] = []
+    broken = QUANT.replace('"value":8,', '"value":9,')  # 800 * 0.01 != 9
 
     async def fake_call(agent, system, user, **kw):
         if agent == "engagement-manager":
-            return "reconciliation with no ledger at all"
+            return "reconciliation" + broken
         if agent == "reflector":
             reflector_prompts.append(user)
             return "LESSON: Always give every assumption a source and a band."
@@ -772,7 +998,6 @@ def test_reflector_sees_quant_gate_defects_not_just_reviewer_notes(
     assert len(reflector_prompts) == 1
     prompt = reflector_prompts[0]
     assert "Quant-gate defects" in prompt
-    assert "no ```quant ledger block found" in prompt
     assert "NOT judgment calls" in prompt
     assert "highest-leverage" in prompt
     lessons = db.list_lessons()
