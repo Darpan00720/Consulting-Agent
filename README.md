@@ -9,15 +9,19 @@ classify → scope → frame → analyze → **review → challenge → verify**
 and hands back an executive-ready deliverable where every number traces to a
 fact, a labeled assumption, or a machine-checked calculation.
 
-[![Try it live](https://img.shields.io/badge/Try_it_live-stratagent.up.railway.app-1d4ed8?style=for-the-badge)](https://stratagent.up.railway.app)
+[![Try it live](https://img.shields.io/badge/▶_Try_it_live-stratagent.up.railway.app-1d4ed8?style=for-the-badge)](https://stratagent.up.railway.app)
 
-![Version](https://img.shields.io/badge/version-0.1.0--rc2-blue) ![License](https://img.shields.io/badge/license-MIT-informational) ![Maturity](https://img.shields.io/badge/maturity-limited%20beta-orange) ![Governed](https://img.shields.io/badge/governance-reviewer%20%2B%20challenger%20%2B%20quant%20gate-2f855a)
+![Version](https://img.shields.io/badge/version-1.0.0--beta.1-blue) ![License](https://img.shields.io/badge/license-MIT-informational) ![Maturity](https://img.shields.io/badge/maturity-limited%20beta-orange) ![Tests](https://img.shields.io/badge/tests-2%2C179%20passing-2f855a) ![Governed](https://img.shields.io/badge/governance-reviewer%20%2B%20challenger%20%2B%20quant%20gate-2f855a)
+
+<br>
+
+<img src="docs/assets/screenshots/architecture.png" alt="StratAgent architecture — a business problem flows through a 10-phase, 16-agent engagement lifecycle guarded by an evidence ledger, deterministic quant gate, mandatory challenge, and a learning loop" width="100%">
 
 </div>
 
 ---
 
-## Use it now
+## 🚀 Use it now
 
 **[stratagent.up.railway.app](https://stratagent.up.railway.app)** — paste a
 business problem, watch the engagement run live, get an executive-ready
@@ -29,7 +33,7 @@ StratAgent.
 
 ---
 
-## See it in action
+## 🎬 See it in action
 
 <table>
 <tr>
@@ -59,7 +63,7 @@ around.</td>
 > unless *you* supplied it. A qualified human must verify every number and own the
 > final recommendation. See [Appropriate Use](docs/beta/Beta-Program-Guide.md#5-ethics--appropriate-use-full).
 
-## What is StratAgent
+## 🧭 What is StratAgent
 
 StratAgent takes a raw business problem (a case-interview prompt, a real client
 brief, or a messy data dump) and runs a complete consulting engagement end to
@@ -81,7 +85,7 @@ overconfidence and blind spots that a single-pass model shipped
 testing the Quant Gate has caught fabricated headline figures, silent rounding
 errors, and unit mismatches that reviewer and challenger both missed.
 
-## How it works
+## 🏗️ How it works
 
 StratAgent is the **consulting vertical**; [Ruflo](https://github.com/ruvnet/ruflo)
 is the **horizontal harness** it's built on. Two cooperating layers:
@@ -138,7 +142,7 @@ exact machine-generated defects are distilled into durable process lessons and
 injected as guardrails into every future engagement's issue-tree step. The
 platform gets stricter with use, not just busier.
 
-## Tech stack
+## 🛠️ Tech stack
 
 | Layer | Technology |
 |---|---|
@@ -149,9 +153,9 @@ platform gets stricter with use, not just busier.
 | **Reference core** | 13 frozen Python packages — event-sourced state, replay engine, deterministic report validation |
 | **Observability** | Custom telemetry package, per-engagement JSONL traces, OTel-ready spans |
 | **Hosting** | Railway (backend + frontend, containerized) |
-| **Quality bar** | `ruff` + `black` + `mypy --strict` + `pytest`, enforced across the reference core (954 tests) and the shipping dashboard (118 tests) |
+| **Quality bar** | `ruff` + `black` + `mypy --strict` + `pytest`, enforced across the reference core (954 tests) and the shipping dashboard (1,225 tests) — **2,179 passing** |
 
-## Features
+## ✨ Features
 
 - **Full engagement lifecycle** — 13-state machine, 16 specialist agents, one command.
 - **Governance by construction** — mandatory Reviewer + Challenger + a rework loop.
@@ -174,7 +178,7 @@ platform gets stricter with use, not just busier.
 
 [ADR-007]: docs/architecture/ADR-007-Evidence-Providers.md
 
-## Development & self-hosting
+## 🧩 Development & self-hosting
 
 The sections below are internal/contributor documentation — how the platform
 is built and how to run a **development copy**. They are not a second product
@@ -216,7 +220,7 @@ review, challenge, `state.json`, and `report.md`). Full guide:
 
 </details>
 
-## Example engagement
+## 📈 Example engagement
 
 A genuinely-executed market-entry engagement (Northwind Cloud) was run during
 evaluation. Engagement outputs are treated as **runtime artifacts** (the
@@ -233,7 +237,7 @@ Two more pilots (`halberd-cost`, `harbor-vine-org`) plus single-pass baselines w
 run the same way; their telemetry traces are in
 [`docs/observability/samples/`](docs/observability/samples/README.md).
 
-## Repository structure
+## 🗂️ Repository structure
 
 ```
 plugins/ruflo-stratagent/   DOMAIN DEFINITION — commands, skill orchestrator, 16 agents
@@ -253,7 +257,7 @@ frozen, strictly-typed reference core. Which one to edit for a given change is
 spelled out in
 [ADR-008: Repository Topology](docs/architecture/ADR-008-Repository-Topology.md).
 
-## Documentation index
+## 📚 Documentation index
 
 | Area | Start here |
 |---|---|
@@ -266,13 +270,13 @@ spelled out in
 | Try with users | [Beta Program](docs/beta/Beta-Program-Guide.md) |
 | Roadmap & release | [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) |
 
-## Roadmap (short)
+## 🧭 Roadmap (short)
 
 Populate an evidence provider (close the assumptions-only gap) · stand up
 telemetry export + dashboards · larger genuine evaluation (n ≥ 12) · enterprise
 hardening. Full list: [ROADMAP.md](ROADMAP.md).
 
-## Questions, issues, or feedback?
+## 💬 Questions, issues, or feedback?
 
 Hit something broken, have a question, or want to talk about the project?
 **[Open an issue](https://github.com/Darpan00720/Consulting-Agent/issues)** —
@@ -280,19 +284,19 @@ that's the one place to leave a comment and reach the team. Bug reports,
 feature ideas, and "here's a case that broke it" are all welcome; the more
 specific ("the conversion assumption is 2× too high"), the more useful.
 
-## Contributing
+## 🤝 Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md). The one-line quality gate is `make check`
 (`ruff` + `black --check` + `mypy` + `pytest`). Never modify the frozen core
 (`packages/state|persistence|replay`) or an accepted ADR — supersede instead.
 
-## Security & support
+## 🔒 Security & support
 
 Report vulnerabilities per [SECURITY.md](SECURITY.md). Getting-help paths are in
 [SUPPORT.md](SUPPORT.md) and [FAQ.md](FAQ.md).
 
-## License
+## 📄 License
 
 [MIT](LICENSE) © 2026 Darpan. Built on [Ruflo](https://github.com/ruvnet/ruflo);
 see [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). If you use StratAgent in research,
